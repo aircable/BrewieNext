@@ -25,6 +25,33 @@ verifies the pinned procedure release, starts the real Python runner with AVR
 access disabled, and starts the web UI. Procedure edits are kept in
 `.dev/programs/workspace`; the downloaded release remains unchanged.
 
+## Starting the backend
+
+`npm run dev` starts both required processes and is the normal command. It
+waits for the backend at <http://127.0.0.1:8081/api/health> before starting the
+frontend at port 5173. Stop both with `Ctrl-C`.
+
+To run them separately for backend or API development, use two terminals:
+
+```sh
+# Terminal 1: bootstrap and start the Flask API/runner safely
+npm run backend
+
+# Terminal 2: start only the Svelte frontend
+npm run dev:web
+```
+
+The development backend always sets `BREWIE_AVR_ENABLED=0`; it cannot actuate
+hardware. Verify it with:
+
+```sh
+curl http://127.0.0.1:8081/api/health
+```
+
+On ReLinux, `/etc/init.d/S85brewie-backend` starts the packaged backend on port
+8081. `S90brewie-kiosk` starts it automatically before launching the kiosk.
+See [the development guide](docs/development.md) for paths and troubleshooting.
+
 ## Repository layout
 
 - `apps/web/` — Svelte editor, live-brew view, and 480×272 kiosk UI.

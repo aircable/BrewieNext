@@ -9,6 +9,8 @@
   "scripts": {
     "setup": "python3 scripts/bootstrap.py",
     "dev": "node scripts/dev.mjs",
+    "backend": "python3 scripts/run_backend.py",
+    "dev:web": "npm run dev --workspace @aircable/brewienext-web -- --host 127.0.0.1",
     "check": "npm run check --workspace @aircable/brewienext-web",
     "build": "npm run build --workspace @aircable/brewienext-web",
     "test": "python3 scripts/run_backend_tests.py",
