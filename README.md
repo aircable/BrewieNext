@@ -47,3 +47,5 @@ development command; real-machine testing must be deliberate and supervised.
 
 This project is under active development. Treat the simulator and procedure
 editor as review tools until a hardware release is explicitly identified.
+
+Versioned application packages are published on the GitHub Releases page.
