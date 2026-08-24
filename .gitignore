@@ -1,0 +1,9 @@
+node_modules/
+apps/web/node_modules/
+apps/web/dist/
+.dev/
+.cache/
+releases/
+__pycache__/
+*.py[cod]
+.DS_Store

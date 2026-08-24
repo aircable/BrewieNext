@@ -1,0 +1,124 @@
+#!/bin/sh
+set -eu
+
+ARCHIVE=${1:?Usage: brewie-install-release package.tar.gz}
+BASE=${BREWIE_RELEASE_ROOT:-/usr/share/brewie}
+RELEASES="$BASE/releases"
+PROGRAM_BASE=${BREWIE_PROGRAM_ROOT:-/var/lib/brewie/programs}
+[ -f "$ARCHIVE" ] || { echo "Package not found: $ARCHIVE" >&2; exit 1; }
+
+case "$ARCHIVE" in
+  *.tar.gz) ;;
+  *) echo "Expected a .tar.gz archive: $ARCHIVE" >&2; exit 1 ;;
+esac
+
+if command -v gzip >/dev/null 2>&1; then
+  GZIP=gzip
+else
+  GZIP="busybox gzip"
+fi
+
+TOP=$($GZIP -dc "$ARCHIVE" | tar -tf - | sed -n '1s#/.*##p')
+case "$TOP" in
+  brewienext-*) VERSION=${TOP#brewienext-} ;;
+  *) echo "Invalid package root: $TOP" >&2; exit 1 ;;
+esac
+case "$VERSION" in
+  ''|*[!A-Za-z0-9._-]*) echo "Invalid release version: $VERSION" >&2; exit 1 ;;
+esac
+
+mkdir -p "$RELEASES"
+
+activate_app() {
+  rm -f "$BASE/.current.new"
+  ln -s "releases/$VERSION" "$BASE/.current.new"
+  rm -f "$BASE/current"
+  mv "$BASE/.current.new" "$BASE/current"
+}
+
+activate_programs() {
+  rm -f "$PROGRAM_BASE/.current.new"
+  ln -s "releases/$PROGRAM_VERSION" "$PROGRAM_BASE/.current.new"
+  rm -f "$PROGRAM_BASE/current"
+  mv "$PROGRAM_BASE/.current.new" "$PROGRAM_BASE/current"
+}
+
+restart_services() {
+  [ "${BREWIE_RESTART_SERVICES:-1}" = "1" ] || return 0
+  if [ -x /etc/init.d/S85brewie-backend ]; then
+    /etc/init.d/S85brewie-backend restart || true
+  fi
+  if [ -x /etc/init.d/S90brewie-kiosk ]; then
+    /etc/init.d/S90brewie-kiosk restart || true
+  fi
+}
+
+install_pinned_programs() {
+  PROGRAM_BUNDLE="$RELEASE/program-bundle"
+  [ -f "$PROGRAM_BUNDLE/version" ] || { echo "Release has no program version" >&2; exit 1; }
+  [ -f "$PROGRAM_BUNDLE/archive-name" ] || { echo "Release has no program archive name" >&2; exit 1; }
+  [ -f "$PROGRAM_BUNDLE/archive.sha256" ] || { echo "Release has no program checksum" >&2; exit 1; }
+  PROGRAM_VERSION=$(sed -n '1p' "$PROGRAM_BUNDLE/version")
+  PROGRAM_ARCHIVE_NAME=$(sed -n '1p' "$PROGRAM_BUNDLE/archive-name")
+  PROGRAM_EXPECTED=$(sed -n '1p' "$PROGRAM_BUNDLE/archive.sha256")
+  case "$PROGRAM_VERSION" in
+    ''|*[!A-Za-z0-9._-]*) echo "Invalid program version: $PROGRAM_VERSION" >&2; exit 1 ;;
+  esac
+  case "$PROGRAM_ARCHIVE_NAME" in
+    ''|*/*) echo "Invalid program archive name" >&2; exit 1 ;;
+  esac
+  PROGRAM_ARCHIVE="$PROGRAM_BUNDLE/$PROGRAM_ARCHIVE_NAME"
+  [ -f "$PROGRAM_ARCHIVE" ] || { echo "Program archive is missing" >&2; exit 1; }
+  PROGRAM_ACTUAL=$(sha256sum "$PROGRAM_ARCHIVE" | sed -n 's/ .*//p')
+  [ "$PROGRAM_ACTUAL" = "$PROGRAM_EXPECTED" ] || {
+    echo "Program bundle checksum mismatch" >&2
+    exit 1
+  }
+
+  mkdir -p "$PROGRAM_BASE/releases"
+  if [ ! -f "$PROGRAM_BASE/releases/$PROGRAM_VERSION/bundle-manifest.json" ]; then
+    PROGRAM_STAGE=$(mktemp -d "$PROGRAM_BASE/releases/.staging.XXXXXX")
+    PROGRAM_TOP=$($GZIP -dc "$PROGRAM_ARCHIVE" | tar -tf - | sed -n '1s#/.*##p')
+    [ -n "$PROGRAM_TOP" ] || { rm -rf "$PROGRAM_STAGE"; echo "Invalid program archive" >&2; exit 1; }
+    $GZIP -dc "$PROGRAM_ARCHIVE" | tar -xf - -C "$PROGRAM_STAGE"
+    [ -f "$PROGRAM_STAGE/$PROGRAM_TOP/bundle-manifest.json" ] || {
+      rm -rf "$PROGRAM_STAGE"
+      echo "Program archive has no manifest" >&2
+      exit 1
+    }
+    mv "$PROGRAM_STAGE/$PROGRAM_TOP" "$PROGRAM_BASE/releases/$PROGRAM_VERSION"
+    rm -rf "$PROGRAM_STAGE"
+  fi
+
+  if [ -f "$PROGRAM_BASE/current/bundle-manifest.json" ]; then
+    echo "Preserving active procedure program release"
+  else
+    rm -f "$PROGRAM_BASE/current"
+    activate_programs
+    echo "Activated initial procedure programs $PROGRAM_VERSION"
+  fi
+}
+
+if [ -e "$RELEASES/$VERSION" ]; then
+  activate_app
+  restart_services
+  echo "Activated existing BrewieNext release $VERSION"
+  exit 0
+fi
+
+STAGE=$(mktemp -d "$RELEASES/.staging.XXXXXX")
+cleanup() { rm -rf "$STAGE"; }
+trap cleanup EXIT INT TERM
+$GZIP -dc "$ARCHIVE" | tar -xf - -C "$STAGE"
+RELEASE="$STAGE/$TOP"
+[ -f "$RELEASE/index.html" ] || { echo "Release has no index.html" >&2; exit 1; }
+[ -f "$RELEASE/manifest.json" ] || { echo "Release has no manifest.json" >&2; exit 1; }
+
+install_pinned_programs
+mv "$RELEASE" "$RELEASES/$VERSION"
+activate_app
+trap - EXIT INT TERM
+rm -rf "$STAGE"
+
+restart_services
+echo "Installed BrewieNext release $VERSION"

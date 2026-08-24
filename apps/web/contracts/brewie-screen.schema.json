@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "BrewieNext Shared Brewie Screen",
+  "type": "object",
+  "required": ["title", "message", "status", "choices", "allowed_controls"],
+  "properties": {
+    "title": { "type": "string" },
+    "message": { "type": "string" },
+    "status": { "enum": ["idle", "running", "waiting_for_input", "paused", "error", "complete"] },
+    "progress": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+    "choices": { "type": "array", "items": { "type": "object", "required": ["value", "label"], "properties": { "value": { "type": "string" }, "label": { "type": "string" } } } },
+    "allowed_controls": { "type": "array", "items": { "enum": ["continue", "pause", "resume", "abort"] } }
+  },
+  "additionalProperties": false
+}

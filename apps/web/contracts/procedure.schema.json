@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "BrewieNext Canonical Procedure",
+  "type": "object",
+  "required": ["name", "states", "start_state", "error_handler"],
+  "properties": {
+    "name": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" },
+    "description": { "type": "string" },
+    "parameters": { "type": "object" },
+    "start_state": { "type": "string" },
+    "error_handler": { "type": "string" },
+    "migration_notes": { "type": "array", "items": { "type": "string" } },
+    "states": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "required": ["description", "transitions"],
+        "properties": {
+          "description": { "type": "string" },
+          "action": { "type": "array", "items": { "type": "object", "minProperties": 1 } },
+          "on_exit": { "type": "array", "items": { "type": "object", "minProperties": 1 } },
+          "conditions": { "type": "array", "items": { "type": "string" } },
+          "timeout_s": { "type": ["string", "number"] },
+          "transitions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["then"],
+              "properties": { "condition": { "type": "string" }, "default": { "type": "string" }, "then": { "type": "string" } },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": false
+}

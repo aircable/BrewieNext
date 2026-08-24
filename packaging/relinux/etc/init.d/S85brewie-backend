@@ -1,0 +1,52 @@
+#!/bin/sh
+
+NAME=brewie-backend
+PIDFILE=/var/run/$NAME.pid
+ROOT=${BREWIE_RELEASE_ROOT:-/usr/share/brewie}/current
+PROGRAM_ROOT=${BREWIE_PROGRAM_ROOT:-/var/lib/brewie/programs}
+PYTHON=${BREWIE_PYTHON:-/usr/bin/python3}
+BACKEND="$ROOT/backend/editor_backend.py"
+
+case "$1" in
+  start)
+    [ -f "$BACKEND" ] || exit 0
+    [ -x "$PYTHON" ] || exit 0
+    export BREWIE_APP_ROOT="$ROOT"
+    export EDITOR_HOST="${EDITOR_HOST:-0.0.0.0}"
+    export EDITOR_PORT="${EDITOR_PORT:-8081}"
+    export EDITOR_DEBUG=0
+    if [ -f "$PROGRAM_ROOT/current/programs/beer_brewing.yml" ]; then
+      export PROCEDURES_DIR="$PROGRAM_ROOT/current/programs"
+      export SCHEMA_PATH="$PROGRAM_ROOT/current/schemas/procedure.schema.json"
+      export GRAPH_SCHEMA_PATH="$PROGRAM_ROOT/current/schemas/workflow.schema.json"
+    else
+      export PROCEDURES_DIR="$ROOT/procedures"
+      export SCHEMA_PATH="$ROOT/backend/procedure.schema.json"
+      export GRAPH_SCHEMA_PATH="$ROOT/backend/procedure-graph.schema.json"
+    fi
+    export RECIPE_SCHEMA_PATH="$ROOT/backend/recipe.schema.json"
+    export BUNDLED_RECIPES_DIR="$ROOT/recipes"
+    export RECIPES_DIR="${BREWIE_RECIPES_DIR:-/var/lib/brewie/recipes}"
+    export BREWIE_HARDWARE_REGISTRY="$ROOT/backend/hardware-device-registry.yml"
+    export BREWIE_AVR_ENABLED="${BREWIE_AVR_ENABLED:-auto}"
+    export BREWIE_AVR_DEVICE="${BREWIE_AVR_DEVICE:-/dev/ttyS1}"
+    export BREWIE_AVR_STATE_FILE="${BREWIE_AVR_STATE_FILE:-/var/lib/brewie/avr_state.json}"
+    export BREWIE_AVR_SAFE_START="${BREWIE_AVR_SAFE_START:-1}"
+    mkdir -p "$RECIPES_DIR"
+    start-stop-daemon -S -q -b -m -p "$PIDFILE" -- "$PYTHON" "$BACKEND"
+    ;;
+  stop)
+    start-stop-daemon -K -q -p "$PIDFILE" -o 2>/dev/null || true
+    rm -f "$PIDFILE"
+    ;;
+  restart|reload)
+    "$0" stop
+    "$0" start
+    ;;
+  *)
+    echo "Usage: $0 {start|stop|restart|reload}" >&2
+    exit 1
+    ;;
+esac
+
+exit 0

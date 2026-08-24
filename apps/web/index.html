@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#101820" />
+    <title>BrewieNext</title>
+  </head>
+  <body>
+    <div id="boot-debug" hidden>BOOT HTML OK</div>
+    <div id="app"></div>
+    <script>
+      (function () {
+        var debug = window.location.search.indexOf('debug=1') !== -1;
+        var panel = document.getElementById('boot-debug');
+        if (debug && panel) {
+          panel.hidden = false;
+          panel.style.cssText = 'position:fixed;z-index:99999;left:0;right:0;top:0;padding:8px;color:#fff;background:#8b2f2f;font:14px monospace;white-space:pre-wrap;';
+          panel.textContent += '\\nURL: ' + window.location.href;
+          window.addEventListener('error', function (event) {
+            var source = event.target && event.target.src ? ' resource=' + event.target.src : '';
+            panel.textContent += '\\nERROR: ' + (event.message || 'script/resource error') + source +
+              ' @ ' + (event.filename || '?') + ':' + (event.lineno || '?') + ':' + (event.colno || '?');
+          });
+          window.addEventListener('unhandledrejection', function (event) {
+            panel.textContent += '\\nPROMISE: ' + String(event.reason);
+          });
+        }
+      }());
+    </script>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

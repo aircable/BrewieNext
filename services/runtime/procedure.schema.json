@@ -1,0 +1,82 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Brewie State Machine Procedure",
+  "description": "Schema for individual brewing sub-procedure state machines (heat water, fill, transfer, boil, etc.)",
+  "type": "object",
+  "required": ["states"],
+  "allOf": [
+    {
+      "anyOf": [
+        { "required": ["phase"] },
+        { "required": ["name"] }
+      ],
+      "description": "Either 'phase' or 'name' must be present as the procedure identifier"
+    },
+    {
+      "anyOf": [
+        { "required": ["error"] },
+        { "required": ["error_handler"] }
+      ],
+      "description": "Either 'error' or 'error_handler' must be present"
+    }
+  ],
+  "properties": {
+    "phase": { "type": "string", "description": "Procedure identifier (snake_case)" },
+    "name": { "type": "string", "description": "Procedure identifier (snake_case)" },
+    "description": { "type": "string" },
+    "parameters": {
+      "type": "object",
+      "description": "Flat key-value parameters for this procedure",
+      "additionalProperties": true
+    },
+    "start_state": {
+      "type": "string",
+      "description": "Entry point state (optional: if omitted, first state in 'states' dict is used)"
+    },
+    "states": {
+      "type": "object",
+      "minProperties": 1,
+      "description": "Map of state name to state definition",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["description"],
+        "properties": {
+          "description": { "type": "string" },
+          "action": {
+            "type": "array",
+            "description": "List of actions to execute in this state",
+            "items": { "type": "object", "minProperties": 1 }
+          },
+          "conditions": {
+            "type": "array",
+            "description": "Pre-condition expressions checked before transition evaluation",
+            "items": { "type": "string" }
+          },
+          "timeout_s": {
+            "type": "string",
+            "description": "Duration string like '30s', '5m', '1h 30m'"
+          },
+          "on_exit": {
+            "type": "array",
+            "description": "Cleanup actions executed when leaving this state",
+            "items": { "type": "object", "minProperties": 1 }
+          },
+          "transition": {
+            "type": "array",
+            "description": "Ordered list of transition rules. Each item is either {expression: target} or {condition: expr, then: target} or {default: target}",
+            "items": {
+              "type": "object",
+              "minProperties": 1,
+              "maxProperties": 2
+            }
+          },
+          "on_error": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "error": { "type": "string", "description": "Error handler reference (may be external)" },
+    "error_handler": { "type": "string", "description": "Error handler reference (may be external)" }
+  },
+  "additionalProperties": true
+}

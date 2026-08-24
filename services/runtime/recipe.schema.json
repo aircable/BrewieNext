@@ -1,0 +1,135 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "BrewieNext Recipe",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "id",
+    "name",
+    "batch_volume_L",
+    "water",
+    "fermentables",
+    "mash",
+    "sparge",
+    "boil",
+    "cooling",
+    "sedimentation"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" },
+    "name": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "style": { "type": "string" },
+    "batch_volume_L": { "type": "number", "exclusiveMinimum": 0 },
+    "water": {
+      "type": "object",
+      "required": ["mash_volume_L", "sparge_volume_L"],
+      "properties": {
+        "mash_volume_L": { "type": "number", "minimum": 0 },
+        "sparge_volume_L": { "type": "number", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "fermentables": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "amount_kg"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "amount_kg": { "type": "number", "exclusiveMinimum": 0 },
+          "bag": { "type": ["string", "integer"] }
+        },
+        "additionalProperties": false
+      }
+    },
+    "mash": {
+      "type": "object",
+      "required": ["mash_in_temperature_C", "steps"],
+      "properties": {
+        "mash_in_temperature_C": { "type": "number" },
+        "steps": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "object",
+            "required": ["name", "target_temperature_C", "duration_min"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "target_temperature_C": { "type": "number" },
+              "duration_min": { "type": "number", "exclusiveMinimum": 0 }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "sparge": {
+      "type": "object",
+      "required": ["target_temperature_C", "cycle_count"],
+      "properties": {
+        "target_temperature_C": { "type": "number" },
+        "cycle_count": { "type": "integer", "minimum": 1, "maximum": 10 }
+      },
+      "additionalProperties": false
+    },
+    "boil": {
+      "type": "object",
+      "required": ["duration_min", "target_temperature_C", "hop_additions"],
+      "properties": {
+        "duration_min": { "type": "number", "exclusiveMinimum": 0 },
+        "target_temperature_C": { "type": "number" },
+        "hop_additions": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "required": ["cage", "minutes_remaining"],
+            "properties": {
+              "cage": { "type": "integer", "minimum": 1, "maximum": 4 },
+              "hop": { "type": "string" },
+              "amount_g": { "type": "number", "minimum": 0 },
+              "minutes_remaining": { "type": "number", "minimum": 0 }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "cooling": {
+      "type": "object",
+      "required": ["target_temperature_C"],
+      "properties": {
+        "target_temperature_C": { "type": "number" }
+      },
+      "additionalProperties": false
+    },
+    "sedimentation": {
+      "type": "object",
+      "required": ["duration_min"],
+      "properties": {
+        "duration_min": { "type": "number", "exclusiveMinimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "yeasts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "amount_g": { "type": "number", "minimum": 0 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "notes": { "type": "string" }
+  },
+  "additionalProperties": false
+}

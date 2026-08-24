@@ -1,0 +1,185 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Brewie hardware device registry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "machine", "operations", "devices"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "machine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "display_name", "registry_scope"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+        "display_name": {"type": "string", "minLength": 1},
+        "registry_scope": {"type": "string", "minLength": 1}
+      }
+    },
+    "operations": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {"pattern": "^[a-z][a-z0-9_]*$"},
+      "additionalProperties": {"$ref": "#/definitions/operation"}
+    },
+    "devices": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {"pattern": "^[a-z][a-z0-9_]*$"},
+      "additionalProperties": {"$ref": "#/definitions/device"}
+    }
+  },
+  "definitions": {
+    "operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "display_name", "transport", "action_parameters", "lifecycle",
+        "argument_order", "fixed_arguments", "dynamic_arguments", "evidence"
+      ],
+      "properties": {
+        "display_name": {"type": "string", "minLength": 1},
+        "transport": {"const": "avr_serial_step"},
+        "action_parameters": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+          "uniqueItems": true
+        },
+        "lifecycle": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "start_command", "step_command", "completion_status",
+            "finish_command", "cancel_command"
+          ],
+          "properties": {
+            "start_command": {"type": "string", "pattern": "^P[0-9]+$"},
+            "step_command": {"type": "string", "pattern": "^P[0-9]+$"},
+            "completion_status": {"type": "string", "pattern": "^P[0-9]+$"},
+            "finish_command": {"type": "string", "pattern": "^P[0-9]+$"},
+            "cancel_command": {"type": "string", "pattern": "^P[0-9]+$"}
+          }
+        },
+        "argument_order": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+          "uniqueItems": true
+        },
+        "fixed_arguments": {
+          "type": "object",
+          "additionalProperties": {"type": ["integer", "boolean"]}
+        },
+        "dynamic_arguments": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["source"],
+            "properties": {
+              "source": {
+                "enum": ["runtime_step_id", "remaining_interval_s", "open_cages"]
+              },
+              "contains": {"type": "integer", "minimum": 1, "maximum": 4}
+            },
+            "allOf": [
+              {
+                "if": {"properties": {"source": {"const": "open_cages"}}},
+                "then": {"required": ["contains"]}
+              }
+            ]
+          }
+        },
+        "evidence": {"$ref": "#/definitions/evidence"}
+      }
+    },
+    "device": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["display_name", "kind", "capabilities", "implementation_status", "evidence"],
+      "properties": {
+        "display_name": {"type": "string", "minLength": 1},
+        "kind": {"enum": ["valve", "pump", "heater", "sensor"]},
+        "aliases": {
+          "type": "array",
+          "items": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"},
+          "uniqueItems": true,
+          "default": []
+        },
+        "capabilities": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"enum": ["open", "close", "on", "off", "temperature_target", "read"]},
+          "uniqueItems": true
+        },
+        "safe_state": {"enum": ["open", "closed", "on", "off"]},
+        "implementation_status": {"enum": ["ready", "needs_hal_policy", "unresolved"]},
+        "control": {"$ref": "#/definitions/control"},
+        "telemetry": {"$ref": "#/definitions/telemetry"},
+        "physical": {"$ref": "#/definitions/physical"},
+        "evidence": {"$ref": "#/definitions/evidence"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"kind": {"const": "sensor"}}},
+          "then": {"required": ["telemetry"]},
+          "else": {"required": ["safe_state", "control"]}
+        }
+      ]
+    },
+    "control": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["transport", "avr_symbol"],
+      "properties": {
+        "transport": {"const": "avr_serial"},
+        "open_command": {"type": "string", "pattern": "^P[0-9]+$"},
+        "close_command": {"type": "string", "pattern": "^P[0-9]+$"},
+        "on_command": {"type": "string", "pattern": "^P[0-9]+$"},
+        "off_command": {"type": "string", "pattern": "^P[0-9]+$"},
+        "target_command_prefix": {"type": "string", "pattern": "^P[0-9]+$"},
+        "off_target_C": {"type": "number"},
+        "avr_symbol": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*$"},
+        "actuator_type": {"enum": ["solenoid", "servo"]}
+      }
+    },
+    "telemetry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["transport", "field", "unit"],
+      "properties": {
+        "transport": {"const": "avr_status"},
+        "field": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+        "unit": {"type": "string", "minLength": 1}
+      }
+    },
+    "physical": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["legacy_topology_id", "path_from", "path_to", "evidence_status"],
+      "properties": {
+        "legacy_topology_id": {"type": "string", "pattern": "^VALVE-[0-9]{2}$"},
+        "path_from": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+        "path_to": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+        "evidence_status": {"enum": ["confirmed", "strong_inference", "unknown"]},
+        "connection_note": {"type": "string", "minLength": 1}
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "sources"],
+      "properties": {
+        "status": {"enum": ["confirmed", "strong_inference", "unknown"]},
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        },
+        "note": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

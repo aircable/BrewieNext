@@ -1,0 +1,368 @@
+schema_version: 1
+machine:
+  id: brewie_b20
+  display_name: Brewie B20
+  registry_scope: Process-control devices exposed by the AVR protocol
+
+operations:
+  run_hop_stage:
+    display_name: AVR-managed timed hop-circulation stage
+    transport: avr_serial_step
+    action_parameters:
+    - open_cages
+    - start_minutes_remaining
+    - end_minutes_remaining
+    - session
+    lifecycle:
+      start_command: P200
+      step_command: P103
+      completion_status: P103
+      finish_command: P201
+      cancel_command: P201
+    argument_order:
+    - step_id
+    - water_inlet
+    - mash_inlet
+    - boil_inlet
+    - mash_temperature_deci_c
+    - boil_temperature_deci_c
+    - hop_cage_1
+    - hop_cage_2
+    - hop_cage_3
+    - hop_cage_4
+    - cooling_valve
+    - valve_11
+    - outlet_valve
+    - mash_pump
+    - boil_pump
+    - water_target
+    - duration_s
+    - primary_mode
+    - secondary_mode
+    - mash_return
+    - boil_return
+    fixed_arguments:
+      water_inlet: 0
+      mash_inlet: 0
+      boil_inlet: 0
+      mash_temperature_deci_c: 0
+      boil_temperature_deci_c: 0
+      cooling_valve: 0
+      valve_11: 0
+      outlet_valve: 0
+      mash_pump: 0
+      boil_pump: 255
+      water_target: 0
+      primary_mode: 6
+      secondary_mode: 3
+      mash_return: 0
+      boil_return: 1
+    dynamic_arguments:
+      step_id: {source: runtime_step_id}
+      hop_cage_1: {source: open_cages, contains: 1}
+      hop_cage_2: {source: open_cages, contains: 2}
+      hop_cage_3: {source: open_cages, contains: 3}
+      hop_cage_4: {source: open_cages, contains: 4}
+      duration_s: {source: remaining_interval_s}
+    evidence:
+      status: confirmed
+      sources:
+      - ../ReBrewieAVR/ReBrewie/ReBrewie.ino:239-241,301-303,543-671
+      - ../OrigBrewieApp/usr/share/brewie/A Firestarter IBL.json:628-726
+      note: P103 stages cumulatively open released cages, run the boil pump with boil return open, and complete when the AVR requests the next P103 step.
+
+devices:
+  water_inlet_valve:
+    display_name: Fresh-water inlet valve
+    kind: valve
+    aliases: [water_inlet]
+    capabilities: [open, close]
+    safe_state: closed
+    implementation_status: ready
+    control:
+      transport: avr_serial
+      open_command: P110
+      close_command: P111
+      avr_symbol: INLET_1
+      actuator_type: solenoid
+    physical:
+      legacy_topology_id: VALVE-01
+      path_from: water_source
+      path_to: boil_tank
+      evidence_status: strong_inference
+    evidence:
+      status: confirmed
+      sources:
+        - ../ReBrewieAVR/B20hardware.md:30-36,79-98
+        - ../ReBrewieAVR/ReBrewie/ReBrewie.ino:308-313
+
+  mash_inlet_valve:
+    display_name: Mash-tank inlet valve
+    kind: valve
+    capabilities: [open, close]
+    safe_state: closed
+    implementation_status: ready
+    control: {transport: avr_serial, open_command: P112, close_command: P113, avr_symbol: VALVE_MASH_IN, actuator_type: servo}
+    physical: {legacy_topology_id: VALVE-12, path_from: process_bus, path_to: mash_tank, evidence_status: strong_inference}
+    evidence: {status: confirmed, sources: [../ReBrewieAVR/B20hardware.md:79-98, ../ReBrewieAVR/ReBrewie/Valves.h:7-16]}
+
+  boil_inlet_valve:
+    display_name: Boil-tank inlet valve
+    kind: valve
+    capabilities: [open, close]
+    safe_state: closed
+    implementation_status: ready
+    control: {transport: avr_serial, open_command: P114, close_command: P115, avr_symbol: VALVE_BOIL_IN, actuator_type: servo}
+    physical: {legacy_topology_id: VALVE-05, path_from: process_bus, path_to: boil_tank, evidence_status: strong_inference}
+    evidence: {status: confirmed, sources: [../ReBrewieAVR/B20hardware.md:79-98, ../ReBrewieAVR/ReBrewie/Valves.h:7-16]}
+
+  hop_cage_1_valve:
+    display_name: Hop-cage 1 valve
+    kind: valve
+    aliases: [hop1, hop_valve_1]
+    capabilities: [open, close]
+    safe_state: closed
+    implementation_status: ready
+    control: {transport: avr_serial, open_command: P116, close_command: P117, avr_symbol: VALVE_HOP_1, actuator_type: servo}
+    physical: {legacy_topology_id: VALVE-08, path_from: process_bus, path_to: hop_cage_1, evidence_status: strong_inference}
+    evidence: {status: confirmed, sources: [../ReBrewieAVR/B20hardware.md:79-98, ../ReBrewieAVR/ReBrewie/Valves.h:7-16]}
+
+  hop_cage_2_valve:
+    display_name: Hop-cage 2 valve
+    kind: valve
+    aliases: [hop2, hop_valve_2]
+    capabilities: [open, close]
+    safe_state: closed
+    implementation_status: ready
+    control: {transport: avr_serial, open_command: P118, close_command: P119, avr_symbol: VALVE_HOP_2, actuator_type: servo}
+    physical: {legacy_topology_id: VALVE-09, path_from: process_bus, path_to: hop_cage_2, evidence_status: strong_inference}
+    evidence: {status: confirmed, sources: [../ReBrewieAVR/B20hardware.md:79-98, ../ReBrewieAVR/ReBrewie/Valves.h:7-16]}
+
+  hop_cage_3_valve:
+    display_name: Hop-cage 3 valve
+    kind: valve
+    aliases: [hop3, hop_valve_3]
+    capabilities: [open, close]
+    safe_state: closed
+    implementation_status: ready
+    control: {transport: avr_serial, open_command: P120, close_command: P121, avr_symbol: VALVE_HOP_3, actuator_type: servo}
+    physical: {legacy_topology_id: VALVE-10, path_from: process_bus, path_to: hop_cage_3, evidence_status: strong_inference}
+    evidence: {status: confirmed, sources: [../ReBrewieAVR/B20hardware.md:79-98, ../ReBrewieAVR/ReBrewie/Valves.h:7-16]}
+
+  hop_cage_4_valve:
+    display_name: Hop-cage 4 valve
+    kind: valve
+    aliases: [hop4, hop_valve_4]
+    capabilities: [open, close]
+    safe_state: closed
+    implementation_status: ready
+    control: {transport: avr_serial, open_command: P122, close_command: P123, avr_symbol: VALVE_HOP_4, actuator_type: servo}
+    physical: {legacy_topology_id: VALVE-11, path_from: process_bus, path_to: hop_cage_4, evidence_status: strong_inference}
+    evidence: {status: confirmed, sources: [../ReBrewieAVR/B20hardware.md:79-98, ../ReBrewieAVR/ReBrewie/Valves.h:7-16]}
+
+  cooling_water_inlet_valve:
+    display_name: Cooling-water inlet valve
+    kind: valve
+    aliases: [cool_out_valve]
+    capabilities: [open, close]
+    safe_state: closed
+    implementation_status: ready
+    control: {transport: avr_serial, open_command: P128, close_command: P129, avr_symbol: INLET_2, actuator_type: solenoid}
+    physical: {legacy_topology_id: VALVE-02, path_from: water_source, path_to: heat_exchanger_water_side, evidence_status: strong_inference}
+    evidence:
+      status: confirmed
+      sources: [../ReBrewieAVR/B20hardware.md:30-36,79-106, ../ReBrewieAVR/ReBrewie/ReBrewie.ino:316-320]
+      note: The legacy alias describes this device poorly and should not be used in new procedures.
+
+  wort_cooling_valve:
+    display_name: Wort cooling-path valve
+    kind: valve
+    aliases: [cooling_valve]
+    capabilities: [open, close]
+    safe_state: closed
+    implementation_status: ready
+    control: {transport: avr_serial, open_command: P130, close_command: P131, avr_symbol: VALVE_COOL, actuator_type: servo}
+    physical: {legacy_topology_id: VALVE-06, path_from: boil_tank, path_to: heat_exchanger_wort_side, evidence_status: strong_inference}
+    evidence: {status: confirmed, sources: [../ReBrewieAVR/B20hardware.md:79-98, ../ReBrewieAVR/ReBrewie/Valves.h:7-16]}
+
+  outlet_valve:
+    display_name: Product/drain outlet valve
+    kind: valve
+    capabilities: [open, close]
+    safe_state: closed
+    implementation_status: ready
+    control: {transport: avr_serial, open_command: P132, close_command: P133, avr_symbol: VALVE_OUTLET, actuator_type: servo}
+    physical: {legacy_topology_id: VALVE-14, path_from: process_bus, path_to: outlet, evidence_status: strong_inference}
+    evidence: {status: confirmed, sources: [../ReBrewieAVR/B20hardware.md:79-98, ../ReBrewieAVR/ReBrewie/Valves.h:7-16]}
+
+  mash_return_valve:
+    display_name: Mash-tank return valve
+    kind: valve
+    capabilities: [open, close]
+    safe_state: closed
+    implementation_status: ready
+    control: {transport: avr_serial, open_command: P134, close_command: P135, avr_symbol: VALVE_MASH_RET, actuator_type: servo}
+    physical:
+      legacy_topology_id: VALVE-13
+      path_from: process_bus
+      path_to: mash_tank
+      evidence_status: confirmed
+      connection_note: Bottom, submerged mash-tank connection; use for pumped transfer to avoid splashing.
+    evidence: {status: confirmed, sources: [../ReBrewieAVR/B20hardware.md:79-98, ../ReBrewieAVR/ReBrewie/Valves.h:7-16]}
+
+  boil_return_valve:
+    display_name: Boil-tank return valve
+    kind: valve
+    capabilities: [open, close]
+    safe_state: closed
+    implementation_status: ready
+    control: {transport: avr_serial, open_command: P136, close_command: P137, avr_symbol: VALVE_BOIL_RET, actuator_type: servo}
+    physical: {legacy_topology_id: VALVE-04, path_from: boil_tank, path_to: process_bus, evidence_status: strong_inference}
+    evidence: {status: confirmed, sources: [../ReBrewieAVR/B20hardware.md:79-98, ../ReBrewieAVR/ReBrewie/Valves.h:7-16]}
+
+  mash_pump:
+    display_name: Mash pump
+    kind: pump
+    aliases: [mash-pump]
+    capabilities: ["on", "off"]
+    safe_state: "off"
+    implementation_status: ready
+    control: {transport: avr_serial, on_command: P124, off_command: P125, avr_symbol: MASH_PUMP}
+    evidence: {status: confirmed, sources: [../ReBrewieAVR/B20hardware.md:30-36,79-98]}
+
+  boil_pump:
+    display_name: Boil pump
+    kind: pump
+    aliases: [boil-pump]
+    capabilities: ["on", "off"]
+    safe_state: "off"
+    implementation_status: ready
+    control: {transport: avr_serial, on_command: P126, off_command: P127, avr_symbol: BOIL_PUMP}
+    evidence: {status: confirmed, sources: [../ReBrewieAVR/B20hardware.md:30-36,79-98]}
+
+  mash_heater:
+    display_name: Mash-tank heater
+    kind: heater
+    aliases: [mash-heater]
+    capabilities: [temperature_target, "off"]
+    safe_state: "off"
+    implementation_status: needs_hal_policy
+    control: {transport: avr_serial, target_command_prefix: P150, off_target_C: 0, avr_symbol: MASH_HEATER}
+    evidence:
+      status: confirmed
+      sources: [../ReBrewieAVR/B20hardware.md:30-36,79-98, ../ReBrewieAVR/ReBrewie/ReBrewie.ino:370-376]
+      note: The direct protocol sets an AVR temperature target; mapping generic on/off actions requires an explicit HAL policy.
+
+  boil_heater:
+    display_name: Boil-tank heater
+    kind: heater
+    aliases: [boil-heater]
+    capabilities: [temperature_target, "off"]
+    safe_state: "off"
+    implementation_status: needs_hal_policy
+    control: {transport: avr_serial, target_command_prefix: P151, off_target_C: 0, avr_symbol: BOIL_HEATER}
+    evidence:
+      status: confirmed
+      sources: [../ReBrewieAVR/B20hardware.md:30-36,79-98, ../ReBrewieAVR/ReBrewie/ReBrewie.ino:370-376]
+      note: The direct protocol sets an AVR temperature target; mapping generic on/off actions requires an explicit HAL policy.
+
+  temp_mash_tank:
+    display_name: Mash-tank temperature
+    kind: sensor
+    aliases: [temp-mash-tank, temperature_mash_tank]
+    capabilities: [read]
+    implementation_status: ready
+    telemetry: {transport: avr_status, field: mash_temperature_c, unit: C}
+    evidence: {status: confirmed, sources: [../ReBrewieAVR/B20hardware.md:38-56, ../ReBrewieAVR/ReBrewie/ReBrewie.ino:247-267]}
+
+  temp_boil_tank:
+    display_name: Boil-tank temperature
+    kind: sensor
+    aliases: [temp-boil-tank, temp-boil-water, temperature_boil_tank]
+    capabilities: [read]
+    implementation_status: ready
+    telemetry: {transport: avr_status, field: boil_temperature_c, unit: C}
+    evidence: {status: confirmed, sources: [../ReBrewieAVR/B20hardware.md:38-56, ../ReBrewieAVR/ReBrewie/ReBrewie.ino:247-267]}
+
+  system_weight:
+    display_name: System load-cell measurement
+    kind: sensor
+    capabilities: [read]
+    implementation_status: ready
+    telemetry: {transport: avr_status, field: mass_raw, unit: raw}
+    evidence:
+      status: confirmed
+      sources: [../ReBrewieAVR/B20hardware.md:38-56, ../ReBrewieAVR/ReBrewie/ReBrewie.ino:247-267]
+      note: Separate boil- and mash-tank weights are not directly reported; their derivation remains unresolved.
+
+  water_volume:
+    display_name: AVR-derived boil-tank water volume
+    kind: sensor
+    capabilities: [read]
+    implementation_status: ready
+    telemetry: {transport: avr_status, field: water_volume, unit: L}
+    evidence:
+      status: confirmed
+      sources:
+        - ../ReBrewieAVR/ReBrewie/ReBrewie.ino:247-267
+        - ../ReBrewieAVR/ReBrewie/ReBrewie.ino:977-992
+        - ../ReBrewieAVR/ReBrewie/ReBrewie.ino:1000-1132
+      note: The B20 load-cell value is converted to liters and used by the legacy sparge routine to track transfers into and out of the boil tank.
+
+  mash_pump_tacho:
+    display_name: Mash-pump tachometer
+    kind: sensor
+    aliases: [tachoMashPump]
+    capabilities: [read]
+    implementation_status: ready
+    telemetry: {transport: avr_status, field: mash_pump_tacho, unit: raw}
+    evidence: {status: confirmed, sources: [../ReBrewieAVR/ReBrewie/ReBrewie.ino:257-267]}
+
+  boil_pump_tacho:
+    display_name: Boil-pump tachometer
+    kind: sensor
+    aliases: [tachoBoilPump]
+    capabilities: [read]
+    implementation_status: ready
+    telemetry: {transport: avr_status, field: boil_pump_tacho, unit: raw}
+    evidence: {status: confirmed, sources: [../ReBrewieAVR/ReBrewie/ReBrewie.ino:257-267]}
+
+  mash_pump_diagnostic:
+    display_name: Mash-pump AVR diagnostic
+    kind: sensor
+    aliases: [mash_pump_diagnostics]
+    capabilities: [read]
+    implementation_status: ready
+    telemetry: {transport: avr_status, field: mash_pump_diagnostic, unit: state_code}
+    evidence:
+      status: confirmed
+      sources: [../ReBrewieAVR/ReBrewie/Pump.cpp:39-75, ../ReBrewieAVR/ReBrewie/ReBrewie.ino:257-267]
+      note: Codes are 0 disabled, 255 starting, 1 running, and 2 dry.
+
+  boil_pump_diagnostic:
+    display_name: Boil-pump AVR diagnostic
+    kind: sensor
+    aliases: [boil_pump_diagnostics]
+    capabilities: [read]
+    implementation_status: ready
+    telemetry: {transport: avr_status, field: boil_pump_diagnostic, unit: state_code}
+    evidence:
+      status: confirmed
+      sources: [../ReBrewieAVR/ReBrewie/Pump.cpp:39-75, ../ReBrewieAVR/ReBrewie/ReBrewie.ino:257-267]
+      note: Codes are 0 disabled, 255 starting, 1 running, and 2 dry.
+
+  mash_pump_current:
+    display_name: Mash-pump current diagnostic
+    kind: sensor
+    capabilities: [read]
+    implementation_status: ready
+    telemetry: {transport: avr_status, field: mash_pump_current, unit: raw_adc}
+    evidence: {status: confirmed, sources: [../ReBrewieAVR/B20hardware.md:38-69, ../ReBrewieAVR/ReBrewie/ReBrewie.ino:262-267]}
+
+  boil_pump_current:
+    display_name: Boil-pump current diagnostic
+    kind: sensor
+    capabilities: [read]
+    implementation_status: ready
+    telemetry: {transport: avr_status, field: boil_pump_current, unit: raw_adc}
+    evidence: {status: confirmed, sources: [../ReBrewieAVR/B20hardware.md:38-69, ../ReBrewieAVR/ReBrewie/ReBrewie.ino:262-267]}

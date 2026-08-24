@@ -1,0 +1,41 @@
+#!/bin/sh
+
+NAME=brewie-kiosk
+PIDFILE=/var/run/$NAME.pid
+WEB_ROOT=${BREWIE_WEB_ROOT:-/usr/share/brewie}
+LAUNCHER=/usr/bin/run-brewie-web-kiosk.sh
+
+case "$1" in
+  start)
+    [ -f "$WEB_ROOT/startup.html" ] || exit 0
+    [ -x "$LAUNCHER" ] || exit 0
+    /etc/init.d/S85brewie-backend start 2>/dev/null || true
+    if [ -f "${BREWIE_RELEASE_ROOT:-/usr/share/brewie}/current/backend/editor_backend.py" ]; then
+      attempts=0
+      while [ "$attempts" -lt 20 ]; do
+        if grep -q ':1F91 .* 0A ' /proc/net/tcp 2>/dev/null; then
+          break
+        fi
+        attempts=$((attempts + 1))
+        sleep 1
+      done
+    fi
+    export BREWIE_WEB_ROOT="${BREWIE_WEB_ROOT:-/usr/share/brewie}"
+    export BREWIE_WEB_URL="${BREWIE_STARTUP_URL:-http://127.0.0.1:8080/startup.html}"
+    start-stop-daemon -S -q -b -m -p "$PIDFILE" -- "$LAUNCHER"
+    ;;
+  stop)
+    start-stop-daemon -K -q -p "$PIDFILE" -o 2>/dev/null || true
+    rm -f "$PIDFILE"
+    ;;
+  restart|reload)
+    "$0" stop
+    "$0" start
+    ;;
+  *)
+    echo "Usage: $0 {start|stop|restart|reload}" >&2
+    exit 1
+    ;;
+esac
+
+exit 0

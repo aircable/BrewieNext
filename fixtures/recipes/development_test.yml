@@ -1,0 +1,57 @@
+batch_volume_L: 20
+boil:
+  duration_min: 100
+  hop_additions:
+  - amount_g: 20
+    cage: 1
+    hop: Bittering hop
+    minutes_remaining: 60
+  - amount_g: 15
+    cage: 2
+    hop: Mid-boil hop
+    minutes_remaining: 30
+  - amount_g: 15
+    cage: 3
+    hop: Aroma hop
+    minutes_remaining: 10
+  - amount_g: 0
+    cage: 4
+    hop: ''
+    minutes_remaining: 5
+  target_temperature_C: 100
+cooling:
+  target_temperature_C: 25
+description: Initial recipe used to validate recipe editing and immutable runtime
+  globals.
+fermentables:
+- amount_kg: 4.5
+  bag: 1
+  name: Pale malt
+- amount_kg: 0.4
+  bag: 1
+  name: Crystal malt
+id: development_test
+mash:
+  mash_in_temperature_C: 63
+  steps:
+  - duration_min: 60
+    name: Saccharification
+    target_temperature_C: 67
+  - duration_min: 10
+    name: Mash out
+    target_temperature_C: 76
+name: Firestarter Brew Recipe
+notes: Confirm all ingredients before starting the development brew.
+schema_version: 1
+sedimentation:
+  duration_min: 20
+sparge:
+  cycle_count: 5
+  target_temperature_C: 78
+style: Modern Brew
+water:
+  mash_volume_L: 15
+  sparge_volume_L: 10
+yeasts:
+- amount_g: 11.5
+  name: Test ale yeast

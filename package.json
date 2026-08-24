@@ -1,0 +1,22 @@
+{
+  "name": "brewienext",
+  "private": true,
+  "version": "0.5.0",
+  "type": "module",
+  "workspaces": [
+    "apps/web"
+  ],
+  "scripts": {
+    "setup": "python3 scripts/bootstrap.py",
+    "dev": "node scripts/dev.mjs",
+    "check": "npm run check --workspace @aircable/brewienext-web",
+    "build": "npm run build --workspace @aircable/brewienext-web",
+    "test": "python3 scripts/run_backend_tests.py",
+    "verify": "npm run check && npm run test && npm run build",
+    "package": "sh packaging/scripts/package-release.sh"
+  },
+  "engines": {
+    "node": ">=20",
+    "npm": ">=10"
+  }
+}

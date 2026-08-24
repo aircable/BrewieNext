@@ -1,0 +1,67 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "BrewieNext Ordered Orchestration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "name", "steps"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "name": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$"},
+    "description": {"type": "string"},
+    "default_recipe": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$"},
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"oneOf": [{"$ref": "#/definitions/procedureStep"}, {"$ref": "#/definitions/parallelStep"}]}
+    }
+  },
+  "definitions": {
+    "procedureStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "procedure"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+        "label": {"type": "string", "minLength": 1},
+        "procedure": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+        "description": {"type": "string"}
+      }
+    },
+    "parallelStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["parallel"],
+      "properties": {
+        "parallel": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "primary", "branches", "join"],
+          "properties": {
+            "id": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+            "label": {"type": "string", "minLength": 1},
+            "primary": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+            "branches": {
+              "type": "array",
+              "minItems": 2,
+              "items": {"$ref": "#/definitions/procedureStep"}
+            },
+            "join": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["deadline", "require", "on_failure"],
+              "properties": {
+                "deadline": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+                "require": {
+                  "type": "object",
+                  "minProperties": 1,
+                  "additionalProperties": {"type": "string", "minLength": 1}
+                },
+                "on_failure": {"type": "string", "minLength": 1}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

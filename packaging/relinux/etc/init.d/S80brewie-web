@@ -1,0 +1,31 @@
+#!/bin/sh
+
+NAME=brewie-web
+PIDFILE=/var/run/$NAME.pid
+WEB_ROOT=${BREWIE_WEB_ROOT:-/usr/share/brewie/current}
+LAUNCHER=/usr/bin/run-brewie-web.sh
+SYSTEM_INFO=/usr/bin/brewie-system-info.sh
+
+case "$1" in
+  start)
+    [ -f "$WEB_ROOT/index.html" ] || [ -f "${BREWIE_WEB_ROOT:-/usr/share/brewie}/startup.html" ] || exit 0
+    [ -x "$LAUNCHER" ] || exit 0
+    export BREWIE_WEB_ROOT="${BREWIE_WEB_ROOT:-/usr/share/brewie}"
+    [ -x "$SYSTEM_INFO" ] && "$SYSTEM_INFO" || true
+    start-stop-daemon -S -q -b -m -p "$PIDFILE" -- "$LAUNCHER"
+    ;;
+  stop)
+    start-stop-daemon -K -q -p "$PIDFILE" -o 2>/dev/null || true
+    rm -f "$PIDFILE"
+    ;;
+  restart|reload)
+    "$0" stop
+    "$0" start
+    ;;
+  *)
+    echo "Usage: $0 {start|stop|restart|reload}" >&2
+    exit 1
+    ;;
+esac
+
+exit 0
