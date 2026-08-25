@@ -257,6 +257,17 @@ class RuntimeApiTests(unittest.TestCase):
             )
             self.assertEqual(response.status_code, 403)
 
+    def test_runtime_mutations_accept_localhost_loopback_alias(self):
+        manager = RuntimeManager(None)
+        with patch("editor_backend.RUNTIME_MANAGER", manager):
+            response = app.test_client().post(
+                "/api/runtime/sessions",
+                base_url="http://127.0.0.1:8081",
+                json={"mode": "simulation", "recipe_id": "development_test"},
+                headers={"Origin": "http://localhost:5173"},
+            )
+            self.assertEqual(response.status_code, 201, response.get_json())
+
 
 if __name__ == "__main__":
     unittest.main()

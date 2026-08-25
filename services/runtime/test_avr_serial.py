@@ -142,6 +142,18 @@ class AvrSerialProtocolTests(unittest.TestCase):
             )
             self.assertEqual(response.status_code, 403)
 
+    def test_machine_mutations_accept_localhost_loopback_alias(self):
+        bridge = ConnectedRecordingBridge()
+        with patch("editor_backend.AVR_BRIDGE", bridge):
+            response = app.test_client().post(
+                "/api/machine/command",
+                base_url="http://127.0.0.1:8081",
+                json={"command": "close_all"},
+                headers={"Origin": "http://localhost:5173"},
+            )
+            self.assertEqual(response.status_code, 200, response.get_json())
+            self.assertEqual(bridge.payloads, ["P999"])
+
 
 if __name__ == "__main__":
     unittest.main()

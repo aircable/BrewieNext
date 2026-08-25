@@ -14,6 +14,7 @@ It provides:
 Paths are resolved relative to this file's location so the entire
 runtime service directory is self-contained.
 """
+import ipaddress
 import json
 import os
 import re
@@ -1878,11 +1879,35 @@ def _runtime_bundle(workflow_name, recipe_id):
     return workflow, procedures, recipe_global_values(recipe)
 
 
+def _is_loopback_hostname(hostname):
+    """Return whether a URL hostname identifies the local loopback host."""
+    if not hostname:
+        return False
+    normalized = hostname.rstrip(".").lower()
+    if normalized == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
+
+
+def _origin_matches_request_host(origin):
+    """Accept an exact host match or equivalent localhost/loopback aliases."""
+    origin_host = urlparse(origin).hostname
+    request_host = urlparse("//" + request.host).hostname
+    if not origin_host or not request_host:
+        return False
+    if origin_host.rstrip(".").lower() == request_host.rstrip(".").lower():
+        return True
+    return _is_loopback_hostname(origin_host) and _is_loopback_hostname(request_host)
+
+
 def _require_local_runtime_command():
     """Limit state-changing runtime calls to the Brewie host UI or localhost."""
     origin = request.headers.get("Origin")
     if origin:
-        if urlparse(origin).hostname != urlparse("//" + request.host).hostname:
+        if not _origin_matches_request_host(origin):
             return jsonify({"error": "Runtime commands require the Brewie same-host UI"}), 403
     elif request.remote_addr not in {"127.0.0.1", "::1"}:
         return jsonify({"error": "Non-browser runtime commands are local-only"}), 403
@@ -1989,7 +2014,7 @@ def api_machine_command():
     """Compile a semantic Brewmaster command into a whitelisted AVR command."""
     origin = request.headers.get("Origin")
     if origin:
-        if urlparse(origin).hostname != urlparse("//" + request.host).hostname:
+        if not _origin_matches_request_host(origin):
             return jsonify({"error": "Machine commands require the Brewie same-host UI"}), 403
     elif request.remote_addr not in {"127.0.0.1", "::1"}:
         return jsonify({"error": "Non-browser machine commands are local-only"}), 403
