@@ -30,9 +30,20 @@ Build and transfer a release as described in
 /var/lib/brewie/programs/current         active machine programs
 /var/lib/brewie/recipes                  persistent user recipes
 /var/lib/brewie/avr_state.json           persisted manual targets
+/etc/brewie/machine.json                 machine-specific AVR calibration
 ```
 
-The backend uses AVR mode `auto` on the appliance and sends acknowledged `P999`
-at startup when safe start is enabled. Restarting the backend therefore stops
-an active brew and returns outputs to their safe state. Hardware testing must
-be supervised.
+Before enabling hardware operation, create `/etc/brewie/machine.json` from the
+machine's original `/usr/share/brewie/config.json`, or copy
+`config/machine.example.json` and enter its measured calibration values. Never
+reuse another machine's load-cell calibration. The required properties are
+`toLiter`, `toLiterNull`, `mashTemperatureDelta`, and
+`boilTemperatureDelta`; `boilingPoint` defaults to 100 °C.
+
+The backend uses AVR mode `auto` on the appliance. At startup it sends `P999`,
+waits for the following status record to confirm that physical valve movement
+has finished, then sends `P80` with this calibration to power on and initialize
+the AVR sensors. Without a valid calibration file, safe reset still runs but
+the AVR is not reported ready for hardware commands. Restarting the backend
+therefore stops an active brew and returns outputs to their safe state.
+Hardware testing must be supervised.

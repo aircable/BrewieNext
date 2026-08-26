@@ -48,7 +48,7 @@ from brewie_procedure_validation import (
     normalize_sensor_name,
     safe_eval_condition,
 )
-from avr_serial import AvrSerialBridge, AvrSerialError
+from avr_serial import AvrSerialBridge, AvrSerialError, load_calibration
 from runtime_engine import RuntimeEngineError, RuntimeManager, WorkflowSession
 
 # ─── Configuration ─────────────────────────────────────────────────────────
@@ -69,6 +69,12 @@ UI_STATE_FILE  = os.environ.get("UI_STATE_FILE", "/tmp/brewie-editor/ui_state.js
 AVR_DEVICE = os.environ.get("BREWIE_AVR_DEVICE", "/dev/ttyS1")
 AVR_STATE_FILE = os.environ.get("BREWIE_AVR_STATE_FILE", "/var/lib/brewie/avr_state.json")
 AVR_SAFE_START = os.environ.get("BREWIE_AVR_SAFE_START", "1").lower() in {"1", "true", "yes"}
+AVR_CALIBRATION_FILE = os.environ.get("BREWIE_AVR_CALIBRATION_FILE", "/etc/brewie/machine.json")
+if not os.path.isfile(AVR_CALIBRATION_FILE) and "BREWIE_AVR_CALIBRATION_FILE" not in os.environ:
+    legacy_calibration = "/usr/share/brewie/config.json"
+    if os.path.isfile(legacy_calibration):
+        AVR_CALIBRATION_FILE = legacy_calibration
+AVR_CALIBRATION = load_calibration(AVR_CALIBRATION_FILE)
 _avr_enabled_setting = os.environ.get("BREWIE_AVR_ENABLED", "auto").lower()
 AVR_ENABLED = _avr_enabled_setting in {"1", "true", "yes"} or (
     _avr_enabled_setting == "auto" and os.path.exists(AVR_DEVICE)
@@ -87,6 +93,7 @@ AVR_BRIDGE = AvrSerialBridge(
     state_file=AVR_STATE_FILE,
     enabled=AVR_ENABLED,
     safe_start=AVR_SAFE_START,
+    calibration=AVR_CALIBRATION,
 )
 RUNTIME_MANAGER = RuntimeManager(AVR_BRIDGE)
 
@@ -2065,6 +2072,9 @@ def api_health():
             "connected": avr_status["connected"],
             "safeStart": AVR_SAFE_START,
             "safeStartComplete": avr_status["safeStartComplete"],
+            "initializationConfigured": avr_status["initializationConfigured"],
+            "initializationComplete": avr_status["initializationComplete"],
+            "calibrationFile": avr_status["calibrationFile"],
             "device": AVR_DEVICE,
             "error": avr_status["lastError"],
         },

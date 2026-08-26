@@ -91,9 +91,12 @@ the overview and **Back to main screen** to return to the active instruction.
 Manual Brewmaster controls bypass procedure sequencing. Use them only while
 observing tank levels and hose/valve routing. The backend accepts semantic,
 same-host browser commands and does not expose arbitrary AVR command strings.
-When the backend starts, it sends `P999` once and waits for its ACK before the
-UI reports the AVR connected. Starting a hardware runner issues another `P999`
-safe baseline. Runtime failure, completion, and abort also close all outputs.
+When the backend starts, it sends `P999`, waits for its following completion
+status, and then sends the calibrated `P80` power-on command. Initialization
+must complete before the UI reports the AVR ready. Check
+`initializationConfigured` and `initializationComplete` in `/api/health` when
+diagnosing startup. Starting a hardware runner issues another `P999` safe
+baseline. Runtime failure, completion, and abort also close all outputs.
 Restarting the backend therefore stops active heating, pumping, valve activity,
 and any AVR-managed brew step.
 

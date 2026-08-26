@@ -5,6 +5,7 @@ module knows the legacy packet framing or accepts access to ``/dev/ttyS1``.
 """
 
 import json
+import math
 import os
 import select
 import termios
@@ -18,6 +19,37 @@ from hardware_registry import HardwareRegistry, HardwareRegistryError
 
 class AvrSerialError(RuntimeError):
     """The AVR transport rejected or could not acknowledge a command."""
+
+
+def load_calibration(path):
+    """Load the machine-specific values required by the AVR P80 command."""
+    if not path:
+        return None
+    calibration_path = Path(path)
+    if not calibration_path.is_file():
+        return None
+    try:
+        stored = json.loads(calibration_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise AvrSerialError("Cannot read AVR calibration %s: %s" % (path, error)) from error
+
+    keys = {
+        "toLiter": "toLiter",
+        "toLiterNull": "toLiterNull",
+        "mashTemperatureDelta": "mashTemperatureDelta",
+        "boilTemperatureDelta": "boilTemperatureDelta",
+    }
+    calibration = {}
+    try:
+        for output_key, stored_key in keys.items():
+            calibration[output_key] = float(stored[stored_key])
+        calibration["boilingPoint"] = float(stored.get("boilingPoint", 100.0))
+    except (KeyError, TypeError, ValueError) as error:
+        raise AvrSerialError("AVR calibration is missing or invalid: %s" % error) from error
+    if calibration["toLiter"] <= 0 or not all(math.isfinite(value) for value in calibration.values()):
+        raise AvrSerialError("AVR calibration values must be finite and toLiter must be positive")
+    calibration["path"] = str(calibration_path)
+    return calibration
 
 
 def encode_command(payload, packet_id):
@@ -43,7 +75,7 @@ def parse_status_record(record):
     if isinstance(record, bytes):
         record = record.decode("ascii", "replace")
     fields = record.rstrip("\r\n").split("\t")
-    if len(fields) < 18 or "V" not in fields[4]:
+    if len(fields) < 19 or "V" not in fields[4]:
         return None
 
     def number(index, default=0.0):
@@ -58,12 +90,14 @@ def parse_status_record(record):
         "water_volume_l": number(6),
         "mash_temperature_c": number(7),
         "boil_temperature_c": number(8),
-        "mash_pump_tacho": number(10),
-        "boil_pump_tacho": number(11),
-        "mash_pump_diagnostic": int(number(12)),
-        "boil_pump_diagnostic": int(number(14)),
-        "mash_heater_output": bool(int(number(16))),
-        "boil_heater_output": bool(int(number(17))),
+        # Fields 9 and 10 are duplicate corrected temperatures in tenths of
+        # a degree. Pump telemetry starts at field 11 in the AVR writer.
+        "mash_pump_tacho": number(11),
+        "boil_pump_tacho": number(12),
+        "mash_pump_diagnostic": int(number(13)),
+        "boil_pump_diagnostic": int(number(15)),
+        "mash_heater_output": bool(int(number(17))),
+        "boil_heater_output": bool(int(number(18))),
     }
 
 
@@ -78,22 +112,26 @@ class AvrSerialBridge:
     PUMPS = ("mash_pump", "boil_pump")
     HEATERS = ("mash_heater", "boil_heater")
 
-    def __init__(self, device="/dev/ttyS1", state_file=None, enabled=True, safe_start=True, registry=None):
+    def __init__(self, device="/dev/ttyS1", state_file=None, enabled=True, safe_start=True, registry=None, calibration=None):
         self.device = device
         self.state_file = Path(state_file) if state_file else None
         self.enabled = enabled
         self.safe_start = safe_start
         self.registry = registry or HardwareRegistry()
+        self.calibration = calibration
         self._fd = None
         self._packet_id = 0
         self._transport_lock = threading.Lock()
         self._state_lock = threading.Lock()
+        self._status_condition = threading.Condition(self._state_lock)
+        self._status_sequence = 0
         self._ack_lock = threading.Lock()
         self._acks = {}
         self._stop = threading.Event()
         self._thread = None
         self._safe_start_thread = None
         self._safe_start_complete = not safe_start
+        self._initialization_complete = not safe_start
         self._last_status_at = 0.0
         self._last_error = None
         self._volume_zero_l = 0.0
@@ -154,8 +192,37 @@ class AvrSerialBridge:
 
     def _perform_safe_start(self):
         self.close_all()
+        if self.enabled:
+            with self._status_condition:
+                acknowledged_sequence = self._status_sequence
+                completed = self._status_condition.wait_for(
+                    lambda: self._status_sequence > acknowledged_sequence,
+                    timeout=15.0,
+                )
+            if not completed:
+                raise AvrSerialError("AVR close-all completion status was not received")
+        if self.calibration:
+            self.initialize()
+        else:
+            self._last_error = "AVR is safe but not initialized: machine calibration file is missing"
         with self._state_lock:
             self._safe_start_complete = True
+
+    def initialize(self):
+        """Load calibration and power on the AVR using its P80 protocol."""
+        if not self.calibration:
+            raise AvrSerialError("AVR initialization requires a machine calibration file")
+        values = self.calibration
+        payload = "P80 %.6f %.6f %.5f %.5f %.2f" % (
+            values["toLiter"],
+            values["toLiterNull"],
+            values["mashTemperatureDelta"],
+            values["boilTemperatureDelta"],
+            values["boilingPoint"],
+        )
+        self.send_payload(payload)
+        with self._state_lock:
+            self._initialization_complete = True
 
     def _load_state(self):
         if not self.state_file:
@@ -252,6 +319,7 @@ class AvrSerialBridge:
         if not parsed:
             return
         with self._state_lock:
+            self._status_sequence += 1
             self._last_status_at = time.monotonic()
             self._raw_water_volume_l = parsed["water_volume_l"]
             self._sensors.update({
@@ -265,6 +333,7 @@ class AvrSerialBridge:
             })
             self._heaters["mash_heater"]["output"] = parsed["mash_heater_output"]
             self._heaters["boil_heater"]["output"] = parsed["boil_heater_output"]
+            self._status_condition.notify_all()
 
     def _next_packet_id(self):
         self._packet_id = self._packet_id % 255 + 1
@@ -361,6 +430,7 @@ class AvrSerialBridge:
         with self._state_lock:
             connected = (
                 self._safe_start_complete
+                and self._initialization_complete
                 and self._fd is not None
                 and time.monotonic() - self._last_status_at < 3.5
             )
@@ -379,6 +449,9 @@ class AvrSerialBridge:
                 "source": "hardware",
                 "connected": connected,
                 "safeStartComplete": self._safe_start_complete,
+                "initializationConfigured": self.calibration is not None,
+                "initializationComplete": self._initialization_complete,
+                "calibrationFile": None if self.calibration is None else self.calibration.get("path"),
                 "serialDevice": self.device,
                 "lastError": self._last_error,
                 "valves": dict(self._valves),

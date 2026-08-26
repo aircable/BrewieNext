@@ -27,6 +27,15 @@ class ConnectedRecordingBridge(RecordingBridge):
 
 
 class AvrSerialProtocolTests(unittest.TestCase):
+    calibration = {
+        "toLiter": 18996.080294,
+        "toLiterNull": 0.0,
+        "mashTemperatureDelta": 0.81854,
+        "boilTemperatureDelta": 1.70194,
+        "boilingPoint": 100.0,
+        "path": "/test/machine.json",
+    }
+
     def test_command_frame_has_packet_id_length_trailing_separator_and_terminator(self):
         self.assertEqual(
             encode_command("P150 675", 7),
@@ -36,13 +45,17 @@ class AvrSerialProtocolTests(unittest.TestCase):
     def test_status_parser_extracts_tank_pump_and_heater_fields(self):
         fields = [
             "-1", "42", "", "", "V15", "1234", "18.5", "64.2", "71.3",
-            "642", "200", "20", "1", "187", "2", "21", "1", "0", "33",
+            "642", "713", "200", "20", "1", "187", "2", "21", "1", "0", "33",
             "", "0", "0", "100", "24", "0", "0",
         ]
         parsed = parse_status_record("\t".join(fields) + "\r\n")
         self.assertEqual(parsed["water_volume_l"], 18.5)
         self.assertEqual(parsed["mash_temperature_c"], 64.2)
         self.assertEqual(parsed["boil_temperature_c"], 71.3)
+        self.assertEqual(parsed["mash_pump_tacho"], 200)
+        self.assertEqual(parsed["boil_pump_tacho"], 20)
+        self.assertEqual(parsed["mash_pump_diagnostic"], 1)
+        self.assertEqual(parsed["boil_pump_diagnostic"], 2)
         self.assertTrue(parsed["mash_heater_output"])
         self.assertFalse(parsed["boil_heater_output"])
 
@@ -55,7 +68,7 @@ class AvrSerialProtocolTests(unittest.TestCase):
 
         fields = [
             "-1", "0", "", "", "V15", "0", "0", "20", "20", "200",
-            "0", "0", "0", "0", "0", "0", "1", "0", "30", "", "0",
+            "200", "0", "0", "0", "0", "0", "0", "1", "0", "30", "", "0",
             "0", "100", "20", "0", "0",
         ]
         bridge._process_record("\t".join(fields).encode())
@@ -78,9 +91,24 @@ class AvrSerialProtocolTests(unittest.TestCase):
         bridge = RecordingBridge()
         bridge.safe_start = True
         bridge._safe_start_complete = False
+        bridge._initialization_complete = False
         bridge._perform_safe_start()
         self.assertEqual(bridge.payloads, ["P999"])
         self.assertTrue(bridge.status()["safeStartComplete"])
+        self.assertFalse(bridge.status()["initializationComplete"])
+
+    def test_safe_start_initializes_calibrated_avr_after_reset(self):
+        bridge = RecordingBridge()
+        bridge.safe_start = True
+        bridge.calibration = self.calibration
+        bridge._safe_start_complete = False
+        bridge._initialization_complete = False
+        bridge._perform_safe_start()
+        self.assertEqual(
+            bridge.payloads,
+            ["P999", "P80 18996.080294 0.000000 0.81854 1.70194 100.00"],
+        )
+        self.assertTrue(bridge.status()["initializationComplete"])
 
     def test_safe_start_round_trip_over_tty(self):
         master_fd, slave_fd = pty.openpty()
@@ -88,29 +116,40 @@ class AvrSerialProtocolTests(unittest.TestCase):
         received = []
         status_fields = [
             "-1", "0", "", "", "V15", "0", "0", "20", "20", "200",
-            "0", "0", "0", "0", "0", "0", "0", "0", "30", "", "0",
+            "200", "0", "0", "0", "0", "0", "0", "0", "0", "30", "", "0",
             "0", "100", "20", "0", "0",
         ]
 
         def fake_avr():
             try:
-                frame = os.read(master_fd, 256)
-                packet_id = frame[1]
-                length = frame[2]
-                received.append(frame[3:3 + length].decode("ascii"))
-                os.write(master_fd, b"$\x01" + bytes((packet_id,)) + b"*\r\n")
-                os.write(master_fd, ("\t".join(status_fields) + "\r\n").encode("ascii"))
+                for _ in range(2):
+                    frame = os.read(master_fd, 256)
+                    packet_id = frame[1]
+                    length = frame[2]
+                    received.append(frame[3:3 + length].decode("ascii"))
+                    os.write(master_fd, b"$\x01" + bytes((packet_id,)) + b"*\r\n")
+                    os.write(master_fd, ("\t".join(status_fields) + "\r\n").encode("ascii"))
+                    time.sleep(0.05)
+                    os.write(master_fd, ("\t".join(status_fields) + "\r\n").encode("ascii"))
             except OSError:
                 pass
 
         responder = threading.Thread(target=fake_avr, daemon=True)
         responder.start()
-        bridge = AvrSerialBridge(device=device, enabled=True, safe_start=True)
+        bridge = AvrSerialBridge(
+            device=device,
+            enabled=True,
+            safe_start=True,
+            calibration=self.calibration,
+        )
         try:
             deadline = time.monotonic() + 3
             while time.monotonic() < deadline and not bridge.status()["connected"]:
                 time.sleep(0.02)
-            self.assertEqual(received, ["P999"])
+            self.assertEqual(received, [
+                "P999",
+                "P80 18996.080294 0.000000 0.81854 1.70194 100.00",
+            ])
             self.assertTrue(bridge.status()["safeStartComplete"])
             self.assertTrue(bridge.status()["connected"])
         finally:
