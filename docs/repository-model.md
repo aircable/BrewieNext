@@ -14,8 +14,11 @@ BrewieNext is split at stable ownership boundaries:
 Application releases pin one published procedure release and SHA-256 in
 `programs.lock.json`. A clean development checkout and a newly installed Brewie
 therefore begin with identical machine programs. Development uses an editable
-copy; released bundles remain immutable. Program changes are reviewed, tagged,
-and released in their own repository before updating the application lock.
+copy when no authoring checkout is available. In the standard side-by-side
+checkout, development instead uses `../BrewieNextProcedures` directly so edits
+remain visible and reviewable in the owning Git repository. Released bundles
+remain immutable. Program changes are reviewed, tagged, and released in their
+own repository before updating the application lock.
 
 The simulator is not a second execution implementation. `npm run dev` starts
 the same Python workflow runner used on the appliance, substituting only the

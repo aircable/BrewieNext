@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import yaml
 
-from editor_backend import RuntimeManager, app, recipe_global_values
+from editor_backend import RuntimeManager, _resolve_procedure_path, app, recipe_global_values
 from hardware_registry import HardwareRegistry
 from runtime_engine import AvrHAL, ProcedureExecution, SimulatedHAL, WorkflowSession
 
@@ -15,7 +15,10 @@ RECIPE_ROOT = Path(os.environ["BUNDLED_RECIPES_DIR"])
 
 
 def load_yaml(name):
-    return yaml.safe_load((EDITOR_ROOT / name).read_text())
+    path = _resolve_procedure_path(name)
+    if path is None:
+        raise FileNotFoundError(name)
+    return yaml.safe_load(path.read_text())
 
 
 class RuntimeProcedureTests(unittest.TestCase):

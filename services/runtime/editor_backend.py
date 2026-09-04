@@ -60,6 +60,7 @@ if _default_root.name == "services":
 BREWIE_ROOT = Path(os.environ.get("BREWIE_APP_ROOT", str(_default_root)))
 
 PROCEDURES_DIR = os.environ.get("PROCEDURES_DIR", str(BREWIE_ROOT))
+PROCEDURES_CREATE_DIR = os.environ.get("PROCEDURES_CREATE_DIR", PROCEDURES_DIR)
 SCHEMA_PATH    = os.environ.get("SCHEMA_PATH",    str(BACKEND_DIR / "procedure.schema.json"))
 GRAPH_SCHEMA_PATH = os.environ.get("GRAPH_SCHEMA_PATH", str(BACKEND_DIR / "procedure-graph.schema.json"))
 RECIPE_SCHEMA_PATH = os.environ.get("RECIPE_SCHEMA_PATH", str(BACKEND_DIR / "recipe.schema.json"))
@@ -898,30 +899,42 @@ def is_procedure_file(path):
 
 def _resolve_procedure_path(name):
     """Find a procedure file by name/stem, trying .yml and .yaml extensions."""
-    p = Path(PROCEDURES_DIR)
-    for ext in (".yml", ".yaml"):
-        candidate = p / f"{name}{ext}"
-        if candidate.exists() and is_procedure_file(candidate):
-            return candidate
-    # Also try the full name as-is (may include extension)
-    candidate = p / name
-    if candidate.exists() and is_procedure_file(candidate):
-        return candidate
+    safe_name = Path(name).name
+    if safe_name != name:
+        return None
+    stem = Path(safe_name).stem if Path(safe_name).suffix in {".yml", ".yaml"} else safe_name
+    for directory in _procedure_search_roots():
+        for ext in (".yml", ".yaml"):
+            candidate = directory / f"{stem}{ext}"
+            if candidate.is_file() and is_procedure_file(candidate):
+                return candidate
     return None
+
+
+def _procedure_search_roots():
+    """Return flat bundle or structured authoring-repository search roots."""
+    root = Path(PROCEDURES_DIR)
+    if (root / "workflows").is_dir() and (root / "procedures").is_dir():
+        procedure_root = root / "procedures"
+        return [
+            root / "workflows",
+            procedure_root,
+            *(path for path in procedure_root.rglob("*") if path.is_dir()),
+        ]
+    return [root]
 
 
 def list_procedure_files():
     """List all YAML procedure files in the procedures directory."""
     files = []
-    p = Path(PROCEDURES_DIR)
-    if not p.exists():
+    root = Path(PROCEDURES_DIR)
+    if not root.exists():
         return files
-    for f in sorted(p.glob("*.yml")):
-        if is_procedure_file(f):
-            files.append(f)
-    for f in sorted(p.glob("*.yaml")):
-        if is_procedure_file(f):
-            files.append(f)
+    for directory in _procedure_search_roots():
+        for pattern in ("*.yml", "*.yaml"):
+            for path in sorted(directory.glob(pattern)):
+                if is_procedure_file(path):
+                    files.append(path)
     return files
 
 
@@ -1582,14 +1595,15 @@ def api_create_procedure():
     if not re.match(r'^[a-z_][a-z0-9_-]*$', name):
         return jsonify({"error": "Name must be snake_case or kebab-case"}), 400
 
-    path = Path(PROCEDURES_DIR) / f"{name}.yml"
-    if path.exists():
+    path = Path(PROCEDURES_CREATE_DIR) / f"{name}.yml"
+    if _resolve_procedure_path(name) or path.exists():
         return jsonify({"error": f"Procedure '{name}' already exists"}), 409
 
     fmt = classify_procedure(data)
     validation = validate_procedure(data, SCHEMA, fmt, graph_schema=GRAPH_SCHEMA)
     if not validation.get("valid", False):
         return jsonify({"error": "Validation failed", "validation": validation}), 422
+    path.parent.mkdir(parents=True, exist_ok=True)
     save_yaml_file(path, data)
     return jsonify({"name": name, "file": path.name, "created": True}), 201
 

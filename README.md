@@ -15,15 +15,22 @@ Requirements: Node.js 20+, npm 10+, Python 3.10+, and Python's `venv` module.
 
 ```sh
 git clone https://github.com/aircable/BrewieNext.git
+git clone https://github.com/aircable/BrewieNextProcedures.git
 cd BrewieNext
 npm install
 npm run dev
 ```
 
+Keep the two repositories beside each other as shown. Procedure-editor saves
+then belong to the `BrewieNextProcedures` Git checkout, where they can be
+validated, reviewed, committed, and released independently.
+
 Open <http://127.0.0.1:5173>. The command creates `.dev/`, downloads and
 verifies the pinned procedure release, starts the real Python runner with AVR
-access disabled, and starts the web UI. Procedure edits are kept in
-`.dev/programs/workspace`; the downloaded release remains unchanged.
+access disabled, and starts the web UI. When a sibling `BrewieNextProcedures`
+checkout is present, development reads and writes that Git working tree
+directly. Otherwise, procedure edits are kept in `.dev/programs/workspace`;
+the downloaded release remains unchanged.
 
 ## Starting the backend
 

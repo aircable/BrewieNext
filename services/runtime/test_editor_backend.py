@@ -7,11 +7,19 @@ import yaml
 
 from editor_backend import (
     ProcedureRunner,
+    _resolve_procedure_path,
     _insert_workflow_step,
     _remove_workflow_step,
     app,
     recipe_global_values,
 )
+
+
+def load_procedure(filename):
+    path = _resolve_procedure_path(filename)
+    if path is None:
+        raise FileNotFoundError(filename)
+    return yaml.safe_load(path.read_text())
 
 
 class ProcedureRunnerExitTests(unittest.TestCase):
@@ -73,7 +81,7 @@ class RecipeGlobalFillTests(unittest.TestCase):
 
         for filename, procedure_name, global_name in cases:
             with self.subTest(procedure=procedure_name):
-                procedure = yaml.safe_load((self.editor_root / filename).read_text())
+                procedure = load_procedure(filename)
                 self.assertNotIn("parameters", procedure)
                 runner = ProcedureRunner(procedure, global_values=globals_snapshot)
                 runner.current_state = "fill_automatic"
@@ -119,7 +127,7 @@ class RecipeGlobalFillTests(unittest.TestCase):
         self.assertIn(("cooling", "sedimentation"), edges)
         self.assertIn(("sedimentation", "transfer_to_fermenter"), edges)
 
-        workflow = yaml.safe_load((self.editor_root / "beer_brewing.yml").read_text())
+        workflow = load_procedure("beer_brewing.yml")
         self.assertIn("steps", workflow)
         self.assertNotIn("nodes", workflow)
         self.assertNotIn("edges", workflow)
@@ -127,7 +135,7 @@ class RecipeGlobalFillTests(unittest.TestCase):
     def test_sparging_uses_cycle_counter_and_boil_tank_reserve(self):
         recipe = yaml.safe_load((self.recipe_root / "development_test.yml").read_text())
         globals_snapshot = recipe_global_values(recipe)
-        procedure = yaml.safe_load((self.editor_root / "sparging.yml").read_text())
+        procedure = load_procedure("sparging.yml")
         self.assertNotIn("parameters", procedure)
         self.assertNotIn("finalize", procedure)
 
@@ -151,7 +159,7 @@ class RecipeGlobalFillTests(unittest.TestCase):
     def test_hopping_releases_every_physical_cage_and_uses_recipe_intervals(self):
         recipe = yaml.safe_load((self.recipe_root / "development_test.yml").read_text())
         globals_snapshot = recipe_global_values(recipe)
-        procedure = yaml.safe_load((self.editor_root / "hopping.yml").read_text())
+        procedure = load_procedure("hopping.yml")
         self.assertNotIn("parameters", procedure)
         self.assertNotIn("finalize", procedure)
 
@@ -196,9 +204,7 @@ class RecipeGlobalFillTests(unittest.TestCase):
         self.assertEqual(runner._evaluate_transitions(finish_state), "next_phase")
 
     def test_transfer_requires_hose_confirmation_before_pump_actions(self):
-        procedure = yaml.safe_load(
-            (self.editor_root / "transfer_to_fermenter.yml").read_text()
-        )
+        procedure = load_procedure("transfer_to_fermenter.yml")
         self.assertEqual(procedure["start_state"], "confirm_fermenter_hoses")
         confirm = procedure["states"]["confirm_fermenter_hoses"]
         self.assertFalse(any("set_pump" in action for action in confirm["action"]))
@@ -209,7 +215,13 @@ class RecipeGlobalFillTests(unittest.TestCase):
         self.assertEqual(runner._evaluate_transitions(confirm), "empty_hop_cages")
 
     def test_procedure_files_do_not_use_hidden_finalize_blocks(self):
-        for path in self.editor_root.glob("*.yml"):
+        for path in (_resolve_procedure_path(name) for name in (
+            "boiling", "cooling", "fill_mash_water", "fill_sparge_water",
+            "heat_mash_water", "heat_sparge_water", "hopping", "prepare_brew",
+            "sedimentation", "sparging", "transfer_to_fermenter",
+            "transfer_water_to_mash", "two_rest_mashing",
+        )):
+            assert path is not None
             if path.name == "beer_brewing.yml":
                 continue
             with self.subTest(procedure=path.name):
@@ -222,7 +234,7 @@ class RecipeGlobalFillTests(unittest.TestCase):
     def test_sedimentation_uses_recipe_duration(self):
         recipe = yaml.safe_load((self.recipe_root / "development_test.yml").read_text())
         globals_snapshot = recipe_global_values(recipe)
-        procedure = yaml.safe_load((self.editor_root / "sedimentation.yml").read_text())
+        procedure = load_procedure("sedimentation.yml")
         state = procedure["states"]["settle_cooled_wort"]
         runner = ProcedureRunner(procedure, global_values=globals_snapshot)
         runner.current_state = "settle_cooled_wort"

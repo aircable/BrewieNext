@@ -14,8 +14,17 @@ workflow runner at `127.0.0.1:8081`, waits for its health check, and then starts
 Vite at `127.0.0.1:5173`. The frontend proxies `/api` requests to the backend.
 Do not run the frontend workspace by itself unless a backend is already active.
 
-Development always uses `BREWIE_AVR_ENABLED=0` and the editable procedure copy
-under `.dev/programs/workspace`.
+Development always uses `BREWIE_AVR_ENABLED=0`. If
+`../BrewieNextProcedures` is a valid authoring checkout, the backend uses its
+structured `workflows/`, `procedures/`, and `schemas/` trees directly. Browser
+edits therefore appear in that repository's `git status`. Set
+`BREWIE_PROCEDURES_SOURCE=/path/to/BrewieNextProcedures` for a different
+checkout location.
+
+When no source checkout is available, development falls back to the editable
+copy under `.dev/programs/workspace`. The exact published bundle in
+`programs.lock.json` remains the packaging and appliance-installation source;
+using a development checkout never changes the release pin implicitly.
 
 ## Separate processes
 

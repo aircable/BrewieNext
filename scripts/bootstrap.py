@@ -21,6 +21,27 @@ CACHE = ROOT / ".cache"
 LOCK_PATH = ROOT / "programs.lock.json"
 
 
+def find_procedure_source() -> Path | None:
+    """Find an authoring checkout without weakening the pinned release path."""
+    configured = os.environ.get("BREWIE_PROCEDURES_SOURCE")
+    candidate = Path(configured).expanduser() if configured else ROOT.parent / "BrewieNextProcedures"
+    candidate = candidate.resolve()
+    required = (
+        candidate / "program-package.yml",
+        candidate / "workflows/beer_brewing.yml",
+        candidate / "procedures",
+        candidate / "schemas/procedure.schema.json",
+        candidate / "schemas/workflow.schema.json",
+    )
+    if all(path.exists() for path in required):
+        return candidate
+    if configured:
+        raise RuntimeError(
+            f"BREWIE_PROCEDURES_SOURCE is not a BrewieNextProcedures checkout: {candidate}"
+        )
+    return None
+
+
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as source:
@@ -110,6 +131,10 @@ def main() -> None:
     DEV.mkdir(parents=True, exist_ok=True)
     python = ensure_venv()
     lock, release, workspace = ensure_programs()
+    source = find_procedure_source()
+    procedures = source or workspace
+    schema_root = source / "schemas" if source else release / "schemas"
+    create_dir = source / "procedures/brewing" if source else workspace
     recipes = DEV / "recipes"
     recipes.mkdir(parents=True, exist_ok=True)
     runtime = {
@@ -117,13 +142,19 @@ def main() -> None:
         "program_version": lock["version"],
         "program_archive": str((CACHE / lock["asset"]).resolve()),
         "program_release": str(release.resolve()),
-        "procedures": str(workspace.resolve()),
+        "program_mode": "source_checkout" if source else "release_workspace",
+        "program_source": str(source) if source else None,
+        "procedures": str(procedures.resolve()),
+        "procedures_create_dir": str(create_dir.resolve()),
+        "procedure_schema": str((schema_root / "procedure.schema.json").resolve()),
+        "workflow_schema": str((schema_root / "workflow.schema.json").resolve()),
         "recipes": str(recipes.resolve()),
     }
     (DEV / "runtime-env.json").write_text(
         json.dumps(runtime, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
-    print(f"BrewieNext development runtime is ready (programs {lock['version']}).")
+    origin = f"source checkout {source}" if source else f"release workspace {lock['version']}"
+    print(f"BrewieNext development runtime is ready ({origin}).")
 
 
 if __name__ == "__main__":
