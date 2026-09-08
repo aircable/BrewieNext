@@ -84,9 +84,8 @@ fallback is CSS rotation on the root screen:
 CSS rotation fixes pixels but confuses old WebKit DOM hit-testing. Therefore:
 
 1. Convert viewport touch coordinates back to portrait coordinates. For the
-   verified clockwise rotation and this panel's raw touch orientation, the
-   mapping is `portrait_x = 272 - viewport_y` and
-   `portrait_y = viewport_x`.
+   clockwise CSS rotation, the inverse mapping is
+   `portrait_x = viewport_y` and `portrait_y = 480 - viewport_x`.
 2. Do not use `elementFromPoint()` for controls.
 3. Hit-test controls using their untransformed `offsetLeft`, `offsetTop`,
    `offsetWidth`, and `offsetHeight` values.

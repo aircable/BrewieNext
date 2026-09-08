@@ -41,8 +41,10 @@
     const screen = event.currentTarget as HTMLElement;
     if (!touch || !screen) return;
     const rect = screen.getBoundingClientRect();
-    const portraitX = 272 - Math.round(touch.clientY - rect.top);
-    const portraitY = Math.round(touch.clientX - rect.left);
+    // The portrait UI is rotated 90 degrees clockwise into the landscape
+    // framebuffer. Undo that CSS transform before drawing or hit-testing.
+    const portraitX = Math.round(touch.clientY - rect.top);
+    const portraitY = 480 - Math.round(touch.clientX - rect.left);
     touchMarker = { visible: true, x: portraitX, y: portraitY };
     if (event.type !== 'touchstart') return;
     const controls = Array.from(screen.querySelectorAll<HTMLElement>('[data-touch-control]'));
