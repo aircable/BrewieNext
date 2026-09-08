@@ -941,7 +941,12 @@ def list_procedure_files():
 def _program_catalog_path():
     """Locate catalog data in either a source checkout or a flat release bundle."""
     root = Path(PROCEDURES_DIR)
-    candidates = (root / "catalog/programs.yml", root.parent / "catalog/programs.yml")
+    schema_root = Path(SCHEMA_PATH).parent
+    candidates = (
+        root / "catalog/programs.yml",
+        root.parent / "catalog/programs.yml",
+        schema_root.parent / "catalog/programs.yml",
+    )
     return next((path for path in candidates if path.is_file()), None)
 
 

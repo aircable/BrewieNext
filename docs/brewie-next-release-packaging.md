@@ -12,10 +12,10 @@ From the repository root:
 ```sh
 npm install
 npm run verify
-npm run package -- 0.6.2
+npm run package -- 0.6.3
 ```
 
-The output is `releases/brewienext-0.6.2.tar.gz` plus its SHA-256 file. The
+The output is `releases/brewienext-0.6.3.tar.gz` plus its SHA-256 file. The
 archive contains the built web application, Python runtime, bundled recipes,
 manifest, lock file, and checksum-verified procedure release archive.
 
@@ -24,7 +24,7 @@ manifest, lock file, and checksum-verified procedure release archive.
 ```sh
 BREWIE_HOST=root@brewienext.local \
   sh packaging/scripts/install-release-to-target.sh \
-  releases/brewienext-0.6.2.tar.gz
+  releases/brewienext-0.6.3.tar.gz
 ```
 
 It installs application releases under `/usr/share/brewie/releases/` and

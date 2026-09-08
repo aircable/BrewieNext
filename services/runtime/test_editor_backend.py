@@ -1,12 +1,15 @@
 import os
+import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import yaml
 
 from editor_backend import (
     ProcedureRunner,
+    _program_catalog_path,
     _resolve_procedure_path,
     _insert_workflow_step,
     _remove_workflow_step,
@@ -14,6 +17,8 @@ from editor_backend import (
     app,
     recipe_global_values,
 )
+
+import editor_backend
 
 
 def load_procedure(filename):
@@ -71,6 +76,21 @@ class ProcedureRunnerExitTests(unittest.TestCase):
 class RecipeGlobalFillTests(unittest.TestCase):
     editor_root = Path(os.environ["PROCEDURES_DIR"])
     recipe_root = Path(os.environ["BUNDLED_RECIPES_DIR"])
+
+    def test_program_catalog_is_found_from_release_schema_root(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workspace = root / "workspace"
+            schema = root / "releases/0.2.0/schemas/procedure.schema.json"
+            catalog = root / "releases/0.2.0/catalog/programs.yml"
+            workspace.mkdir()
+            schema.parent.mkdir(parents=True)
+            catalog.parent.mkdir(parents=True)
+            schema.write_text("{}")
+            catalog.write_text("schema_version: 1\nprograms: []\n")
+            with patch.object(editor_backend, "PROCEDURES_DIR", str(workspace)), \
+                    patch.object(editor_backend, "SCHEMA_PATH", str(schema)):
+                self.assertEqual(_program_catalog_path(), catalog)
 
     def test_program_catalog_distinguishes_available_and_design_programs(self):
         response = app.test_client().get("/api/programs")
