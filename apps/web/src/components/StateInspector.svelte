@@ -2,7 +2,8 @@
   import type { GraphNode, ProcedureDocument } from '../lib/model';
   export let node: GraphNode;
   export let procedure: ProcedureDocument | null = null;
-  export let onEdit: (event: Event) => void;
+  export let onNodeEdit: (field: 'label' | 'description', value: string) => void;
+  export let onNodeSave: () => void;
   export let onValidate: () => void;
   export let onSave: () => void;
   export let selectedStateId = '';
@@ -33,12 +34,16 @@
 
 <aside class="inspector">
   <div class="eyebrow">SELECTED NODE</div>
-  <h2>{node.label}</h2>
   <p class="muted">{node.procedure}</p>
   <label>
-    Description
-    <textarea value={node.description} on:input={onEdit}></textarea>
+    Name
+    <input value={node.label} on:input={(event) => onNodeEdit('label', (event.currentTarget as HTMLInputElement).value)} />
   </label>
+  <label>
+    Description
+    <textarea value={node.description} on:input={(event) => onNodeEdit('description', (event.currentTarget as HTMLTextAreaElement).value)}></textarea>
+  </label>
+  <button on:click={onNodeSave}>Save node</button>
   <div class="inspector-section">
     <div class="eyebrow">PROCEDURE</div>
     {#if procedure}

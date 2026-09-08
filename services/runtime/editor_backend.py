@@ -938,6 +938,25 @@ def list_procedure_files():
     return files
 
 
+def _program_catalog_path():
+    """Locate catalog data in either a source checkout or a flat release bundle."""
+    root = Path(PROCEDURES_DIR)
+    candidates = (root / "catalog/programs.yml", root.parent / "catalog/programs.yml")
+    return next((path for path in candidates if path.is_file()), None)
+
+
+def _program_for_workflow(workflow_name):
+    """Return catalog metadata for a workflow when a catalog is installed."""
+    catalog_path = _program_catalog_path()
+    if not catalog_path:
+        return None
+    catalog = load_yaml_file(catalog_path) or {}
+    return next((
+        program for program in catalog.get("programs", [])
+        if isinstance(program, dict) and program.get("workflow") == workflow_name
+    ), None)
+
+
 def load_yaml_file(path):
     with open(path, "r") as f:
         return yaml.safe_load(f)
@@ -1130,6 +1149,12 @@ def recipe_global_values(recipe):
         "batch_volume_L": recipe.get("batch_volume_L"),
         "mash_water_volume_L": water.get("mash_volume_L"),
         "sparge_water_volume_L": water.get("sparge_volume_L"),
+        "lme_boil_tank_volume_L": water.get("mash_volume_L"),
+        "lme_mash_tank_volume_L": water.get("sparge_volume_L"),
+        "lme_mash_target_temperature_C": sparge.get("target_temperature_C"),
+        # Compatibility aliases for early Studio-authored LME drafts.
+        "lme1_water_volume_L": water.get("mash_volume_L"),
+        "lme2_water_volume_L": water.get("sparge_volume_L"),
         "fermentables": recipe.get("fermentables", []),
         "mash_in_temperature_C": mash.get("mash_in_temperature_C"),
         "mash_steps": mash_steps,
@@ -1176,6 +1201,32 @@ def persist_validated(path, data):
 
 
 # ─── API Routes ────────────────────────────────────────────────────────────
+
+@app.route("/api/programs", methods=["GET"])
+def api_list_programs():
+    """Return the brewer-facing catalog, including programs still being designed."""
+    catalog_path = _program_catalog_path()
+    if catalog_path:
+        catalog = load_yaml_file(catalog_path) or {}
+        programs = catalog.get("programs", [])
+        if isinstance(programs, list):
+            return jsonify({"programs": programs})
+
+    programs = []
+    for path in list_procedure_files():
+        data = load_yaml_file(path) or {}
+        if classify_procedure(data) != "graph":
+            continue
+        name = normalize_name(data) or path.stem
+        programs.append({
+            "id": name,
+            "label": name.replace("_", " ").title(),
+            "category": "brewing",
+            "description": data.get("description", name),
+            "status": "available",
+            "workflow": name,
+        })
+    return jsonify({"programs": programs})
 
 @app.route("/api/recipes", methods=["GET"])
 def api_list_recipes():
@@ -1415,6 +1466,7 @@ def _graph_api_model(data):
     return {
         "name": data.get("name", "beer_brewing"),
         "description": data.get("description", ""),
+        "default_recipe": data.get("default_recipe"),
         "entry_point": data.get("entry_point", data.get("start_state", normalized_nodes[0]["id"] if normalized_nodes else "")),
         "source_format": "sequence" if isinstance(data.get("steps"), list) else "graph",
         "nodes": normalized_nodes,
@@ -1484,6 +1536,21 @@ def _remove_workflow_step(graph_data, step_id):
     raise ValueError(f"Workflow step '{step_id}' not found")
 
 
+def _update_workflow_step(graph_data, step_id, changes):
+    """Update brewer-facing metadata on a sequential step or parallel branch."""
+    updated = deepcopy(graph_data)
+    steps = updated.get("steps")
+    if not isinstance(steps, list):
+        raise ValueError("Workflow does not use ordered steps")
+    for step in steps:
+        candidates = step.get("parallel", {}).get("branches", []) if "parallel" in step else [step]
+        for candidate in candidates:
+            if isinstance(candidate, dict) and candidate.get("id") == step_id:
+                candidate.update(changes)
+                return updated
+    raise ValueError(f"Workflow step '{step_id}' not found")
+
+
 @app.route("/api/graphs/<name>", methods=["GET"])
 def api_get_graph(name):
     """Return an orchestration graph in the frontend's explicit graph model."""
@@ -1542,6 +1609,40 @@ def api_remove_graph_step(name, step_id):
         updated = _remove_workflow_step(graph_data, step_id)
     except ValueError as error:
         return jsonify({"error": str(error)}), 409
+    failure = persist_validated(path, updated)
+    if failure:
+        return failure
+    return jsonify({"name": name, "data": _graph_api_model(updated)})
+
+
+@app.route("/api/graphs/<name>/steps/<step_id>", methods=["PATCH"])
+def api_update_graph_step(name, step_id):
+    """Update the displayed name and description of a workflow node."""
+    path = _resolve_procedure_path(name)
+    if not path:
+        return jsonify({"error": f"Graph '{name}' not found"}), 404
+    graph_data = load_yaml_file(path)
+    if classify_procedure(graph_data) != "graph" or not isinstance(graph_data.get("steps"), list):
+        return jsonify({"error": f"'{name}' is not an ordered workflow"}), 400
+
+    body = request.get_json(silent=True) or {}
+    unexpected = set(body) - {"label", "description"}
+    if unexpected:
+        return jsonify({"error": f"Unsupported workflow node fields: {', '.join(sorted(unexpected))}"}), 400
+    label = body.get("label")
+    description = body.get("description")
+    if not isinstance(label, str) or not label.strip():
+        return jsonify({"error": "Node name must not be empty"}), 400
+    if not isinstance(description, str):
+        return jsonify({"error": "Node description must be text"}), 400
+
+    try:
+        updated = _update_workflow_step(graph_data, step_id, {
+            "label": label.strip(),
+            "description": description.strip(),
+        })
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 404
     failure = persist_validated(path, updated)
     if failure:
         return failure
@@ -1943,11 +2044,17 @@ def api_start_runtime_session():
         return denied
     body = request.get_json(silent=True) or {}
     mode = body.get("mode", "simulation")
+    workflow_name = body.get("workflow", "beer_brewing")
+    program = _program_for_workflow(workflow_name)
+    if program and program.get("status") != "available":
+        return jsonify({
+            "error": f"Program '{program.get('label', workflow_name)}' is still in design"
+        }), 400
     if mode == "hardware" and body.get("confirm_hardware") is not True:
         return jsonify({"error": "Hardware mode requires confirm_hardware=true"}), 400
     try:
         workflow, procedures, globals_snapshot = _runtime_bundle(
-            body.get("workflow", "beer_brewing"), body.get("recipe_id")
+            workflow_name, body.get("recipe_id")
         )
         session = RUNTIME_MANAGER.start(
             workflow, procedures, globals_snapshot,

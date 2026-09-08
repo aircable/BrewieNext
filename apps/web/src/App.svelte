@@ -5,10 +5,12 @@
   import RecipeEditor from './components/RecipeEditor.svelte';
   import StateInspector from './components/StateInspector.svelte';
   import ProcedureStateGraph from './components/ProcedureStateGraph.svelte';
-  import { addWorkflowStep, controlRuntime, createProcedure, loadGraph, loadMachineStatus, loadProcedure, loadRecipe, loadRecipes, loadRuntimeStatus, navigateRuntime, provideRuntimeInput, removeWorkflowStep, resolveGraph, saveProcedure, saveRecipe, sendMachineCommand, startRuntime, validateDraft, validateRecipe, type RuntimeStatus } from './lib/api';
+  import ProgramCatalog from './components/ProgramCatalog.svelte';
+  import ProgramScreen from './components/ProgramScreen.svelte';
+  import { addWorkflowStep, controlRuntime, createProcedure, loadGraph, loadMachineStatus, loadProcedure, loadPrograms, loadRecipe, loadRecipes, loadRuntimeStatus, navigateRuntime, provideRuntimeInput, removeWorkflowStep, resolveGraph, saveProcedure, saveRecipe, sendMachineCommand, startRuntime, updateWorkflowStep, validateDraft, validateRecipe, type RuntimeStatus } from './lib/api';
   import { graph, session, selectedNode, selectedProcedure, editorMode, notice } from './lib/store';
   import { buildSimulationPlan, createIdleMachineStatus, type SimulationPlan } from './lib/simulation';
-  import type { GraphNode, ProcedureDocument, Recipe, RecipeSummary } from './lib/model';
+  import type { GraphNode, ProcedureDocument, ProgramSummary, Recipe, RecipeSummary } from './lib/model';
 
   let currentGraph = $graph;
   let currentSession = $session;
@@ -17,9 +19,11 @@
   let mode = $editorMode;
   let message = $notice;
   let selectedState = '';
+  let programs: ProgramSummary[] = [];
   let recipes: RecipeSummary[] = [];
   let currentRecipe: Recipe | null = null;
   let procedureDirty = false;
+  let nodeDirty = false;
   let recipeDirty = false;
   let simulationPlan: SimulationPlan | null = null;
   let runtimeSnapshot: RuntimeStatus | null = null;
@@ -43,7 +47,7 @@
 
   onMount(() => {
     const warnBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (!procedureDirty && !recipeDirty) return;
+      if (!procedureDirty && !nodeDirty && !recipeDirty) return;
       event.preventDefault();
       event.returnValue = '';
     };
@@ -66,6 +70,9 @@
         debug(`Workflow loaded: ${value.nodes.length} procedures`);
       })
       .catch((error) => debug(`GRAPH ERROR: ${error instanceof Error ? error.message : String(error)}`));
+    loadPrograms()
+      .then((value) => (programs = value))
+      .catch((error) => debug(`PROGRAM ERROR: ${error instanceof Error ? error.message : String(error)}`));
     loadRecipes()
       .then(async (value) => {
         recipes = value;
@@ -84,9 +91,10 @@
   });
 
   function allowNavigation() {
-    if (!procedureDirty && !recipeDirty) return true;
+    if (!procedureDirty && !nodeDirty && !recipeDirty) return true;
     if (!window.confirm('You have unsaved changes. Discard them and leave this page?')) return false;
     procedureDirty = false;
+    nodeDirty = false;
     recipeDirty = false;
     return true;
   }
@@ -103,11 +111,48 @@
 
   async function showRuntime() {
     if (mode !== 'runtime' && !allowNavigation()) return;
+    const program = programs.find((candidate) => candidate.workflow === currentGraph.name);
+    if (program?.status !== 'available') {
+      message = `${program?.label || currentGraph.name} is still in design and cannot run yet.`;
+      return;
+    }
     editorMode.set('runtime');
     if (!simulationPlan) await prepareSimulation();
   }
+  function showPrograms() { if (mode === 'programs' || allowNavigation()) editorMode.set('programs'); }
   function showOverview() { if (mode === 'overview' || allowNavigation()) editorMode.set('overview'); }
   function showRecipes() { if (mode === 'recipes' || allowNavigation()) editorMode.set('recipes'); }
+  async function openProgram(program: ProgramSummary) {
+    if (!allowNavigation()) return;
+    if (!program.workflow) {
+      message = `${program.label} does not have a workflow document yet.`;
+      return;
+    }
+    try {
+      const loadedGraph = await loadGraph(program.workflow);
+      graph.set(loadedGraph);
+      if (loadedGraph.default_recipe) {
+        currentRecipe = await loadRecipe(loadedGraph.default_recipe);
+        recipeDirty = false;
+      }
+      const firstNode = loadedGraph.nodes[0];
+      if (firstNode) {
+        selectedNode.set(firstNode);
+        selectedProcedure.set(await loadProcedure(firstNode.procedure));
+      } else {
+        selectedProcedure.set(null);
+      }
+      selectedState = '';
+      nodeDirty = false;
+      simulationPlan = null;
+      editorMode.set('overview');
+      message = program.status === 'available'
+        ? `Opened ${program.label}.`
+        : `Opened ${program.label} draft. Add its first procedure to begin designing it.`;
+    } catch (error) {
+      message = `Program load failed: ${error instanceof Error ? error.message : 'unknown error'}`;
+    }
+  }
   async function selectRecipe(id: string) {
     if (currentRecipe?.id === id || !allowNavigation()) return;
     try {
@@ -197,7 +242,7 @@
       }
       await saveRecipe(currentRecipe);
       recipeDirty = false;
-      const resolved = await resolveGraph(currentRecipe.id);
+      const resolved = await resolveGraph(currentRecipe.id, currentGraph.name);
       graph.set(resolved);
       simulationPlan = null;
       runtimeSnapshot = null;
@@ -306,7 +351,7 @@
         else if (runtimeSnapshot.status === 'waiting_for_input') message = 'The runner is waiting for the choice shown on the local screen.';
         return;
       }
-      applyRuntimeSnapshot(await startRuntime({ mode: 'simulation', recipe_id: currentRecipe.id, speed: simulationSpeed }));
+      applyRuntimeSnapshot(await startRuntime({ mode: 'simulation', recipe_id: currentRecipe.id, workflow: currentGraph.name, speed: simulationSpeed }));
       message = `Authoritative simulation running at ${simulationSpeed}×.`;
     } catch (error) {
       message = `Simulation start failed: ${error instanceof Error ? error.message : String(error)}`;
@@ -328,7 +373,7 @@
     }
     try {
       if (runtimeSnapshot && !['complete', 'error', 'aborted'].includes(runtimeSnapshot.status)) await controlRuntime('abort');
-      applyRuntimeSnapshot(await startRuntime({ mode: 'simulation', recipe_id: currentRecipe.id, speed: simulationSpeed }));
+      applyRuntimeSnapshot(await startRuntime({ mode: 'simulation', recipe_id: currentRecipe.id, workflow: currentGraph.name, speed: simulationSpeed }));
       message = 'Simulation restarted from the first procedure.';
     } catch (error) {
       message = `Simulation reset failed: ${error instanceof Error ? error.message : String(error)}`;
@@ -341,7 +386,7 @@
         if (!window.confirm('An active runner session exists. Abort and replace it?')) return;
         await controlRuntime('abort');
       }
-      applyRuntimeSnapshot(await startRuntime({ mode: 'hardware', recipe_id: currentRecipe.id, confirm_hardware: true }));
+      applyRuntimeSnapshot(await startRuntime({ mode: 'hardware', recipe_id: currentRecipe.id, workflow: currentGraph.name, confirm_hardware: true }));
       message = 'Hardware runner started at 1×; AVR commands are live.';
     } catch (error) {
       message = `Hardware start failed: ${error instanceof Error ? error.message : String(error)}`;
@@ -377,6 +422,8 @@
       else if (control === 'previous_procedure' || control === 'next_procedure') {
         applyRuntimeSnapshot(await navigateRuntime(control === 'previous_procedure' ? 'previous' : 'next'));
         message = `Runner moved to ${runtimeSnapshot?.active_procedure?.replace(/_/g, ' ')}.`;
+      } else if (control === 'programs') {
+        showPrograms();
       } else if (control === 'abort') {
         if (!window.confirm(`Abort the ${runtimeSnapshot?.mode || 'active'} runner and close all outputs?`)) return;
         applyRuntimeSnapshot(await controlRuntime('abort'));
@@ -400,7 +447,29 @@
       message = `Runner command failed: ${error instanceof Error ? error.message : String(error)}`;
     }
   }
-  function editNode(_event: Event) { procedureDirty = true; message = `Draft changed for ${currentNode.procedure}. Validate before saving.`; }
+  function editNodeMetadata(field: 'label' | 'description', value: string) {
+    const nodes = currentGraph.nodes.map((node) => node.id === currentNode.id ? { ...node, [field]: value } : node);
+    const updatedGraph = { ...currentGraph, nodes };
+    graph.set(updatedGraph);
+    selectedNode.set(nodes.find((node) => node.id === currentNode.id) || currentNode);
+    nodeDirty = true;
+    message = `Workflow node changed. Save the node to update ${currentGraph.name}.`;
+  }
+  async function saveNodeMetadata() {
+    if (!currentNode || !nodeDirty) return;
+    try {
+      const updated = await updateWorkflowStep(currentGraph.name, currentNode.id, {
+        label: currentNode.label,
+        description: currentNode.description || ''
+      });
+      graph.set(updated);
+      selectedNode.set(updated.nodes.find((node) => node.id === currentNode.id) || currentNode);
+      nodeDirty = false;
+      message = `Saved workflow node ${currentNode.label}.`;
+    } catch (error) {
+      message = `Save node failed: ${error instanceof Error ? error.message : 'unknown error'}`;
+    }
+  }
   async function addProcedureToWorkflow(after?: string) {
     if (!allowNavigation()) return;
     const requested = window.prompt('Procedure ID (lowercase snake_case):', 'new_procedure');
@@ -415,6 +484,7 @@
     if (requestedLabel === null) return;
     const label = requestedLabel.trim() || defaultLabel;
     try {
+      const wasEmpty = currentGraph.nodes.length === 0;
       const existing = await loadProcedure(procedureId);
       if (!existing) await createProcedure(procedureId, label);
       const updated = await addWorkflowStep(currentGraph.name, {
@@ -424,6 +494,10 @@
         ...(after ? { after } : {})
       });
       graph.set(updated);
+      if (wasEmpty && updated.nodes[0]) {
+        selectedNode.set(updated.nodes[0]);
+        selectedProcedure.set(await loadProcedure(updated.nodes[0].procedure));
+      }
       message = `Added ${procedureId}${after ? ` after ${after}` : ' at the end of the workflow'}.`;
     } catch (error) {
       message = `Add procedure failed: ${error instanceof Error ? error.message : 'unknown error'}`;
@@ -643,23 +717,35 @@
 
 {#if kioskMode}
   <main class="kiosk-layout" aria-label="Brewie hardware display">
-    <BrewieScreen session={currentSession} machine={machineStatus} onControl={simulationControl} />
+    {#if mode === 'programs'}
+      <ProgramScreen {programs} onSelect={openProgram} />
+    {:else}
+      <BrewieScreen session={currentSession} machine={machineStatus} onControl={simulationControl} />
+    {/if}
   </main>
 {:else}
 <div class="app-shell">
   <header class="topbar">
     <div><div class="brand">BREWIE<span>NEXT</span></div><div class="subtitle">Procedure Studio</div></div>
     <nav>
-      <button class:active={mode === 'overview'} on:click={showOverview}>Brew workflow</button>
+      <button class:active={mode === 'programs'} on:click={showPrograms}>Programs</button>
       <button class:active={mode === 'recipes'} on:click={showRecipes}>Recipes</button>
-      <button class:active={mode === 'runtime'} on:click={showRuntime}>Live brew</button>
-      <span class="connection">● LOCAL FIXTURE</span>
+      <button class:active={mode === 'runtime'} on:click={showRuntime} disabled={programs.find((program) => program.workflow === currentGraph.name)?.status === 'design'}>Live brew</button>
+      <span class="connection">● LOCAL</span>
     </nav>
   </header>
 
   <div class="notice">{message}</div>
 
-  {#if mode === 'recipes'}
+  {#if mode === 'programs'}
+    <main class="programs-layout">
+      <ProgramCatalog {programs} onOpen={openProgram} />
+      <aside class="runtime-sidebar program-previews">
+        <div class="runtime-popup"><div class="eyebrow">LOCAL BREWIE SCREEN · PROGRAMS</div><ProgramScreen {programs} onSelect={openProgram} /></div>
+        <div class="runtime-popup"><div class="eyebrow">BREWMASTER STATUS · READY</div><BrewieScreen session={currentSession} machine={machineStatus} onControl={simulationControl} initialView="machine" /></div>
+      </aside>
+    </main>
+  {:else if mode === 'recipes'}
     <main class="recipe-layout">
       <RecipeEditor recipes={recipes} recipe={currentRecipe} onSelect={selectRecipe} onChange={editRecipe} onValidate={validateCurrentRecipe} onSave={saveCurrentRecipe} onUse={useCurrentRecipe} onNew={newRecipe} />
     </main>
@@ -703,15 +789,19 @@
         <div class="section-heading"><div><button on:click={showOverview}>← Workflow</button><div class="eyebrow">SUBPROCEDURE</div><h1>{currentProcedure.name}</h1></div><div class="workflow-actions"><button on:click={() => addProcedureToWorkflow(currentNode.id)}>+ Procedure after</button><button class="danger" on:click={removeCurrentWorkflowStep}>Remove from workflow</button><button class="primary" on:click={validateCurrent}>Validate procedure</button></div></div>
         <ProcedureStateGraph procedure={currentProcedure} selectedState={selectedState || currentProcedure.start_state} onSelect={selectState} onReorder={reorderState} onAdd={addState} onRemove={removeState} />
       </section>
-      <StateInspector node={currentNode} procedure={currentProcedure} selectedStateId={selectedState || currentProcedure.start_state} onStateEdit={editState} onStateRename={renameState} onEdit={editNode} onValidate={validateCurrent} onSave={saveCurrent} />
+      <StateInspector node={currentNode} procedure={currentProcedure} selectedStateId={selectedState || currentProcedure.start_state} onStateEdit={editState} onStateRename={renameState} onNodeEdit={editNodeMetadata} onNodeSave={saveNodeMetadata} onValidate={validateCurrent} onSave={saveCurrent} />
     </main>
   {:else}
     <main class="studio-layout">
       <section class="workspace">
-        <div class="section-heading"><div><div class="eyebrow">ORDERED BREW WORKFLOW</div><h1>{currentGraph.description}</h1></div><div class="workflow-actions"><button on:click={() => addProcedureToWorkflow()}>+ Procedure at end</button><button class="primary">Validate workflow</button></div></div>
+        <div class="section-heading"><div><button on:click={showPrograms}>← Programs</button><div class="eyebrow">ORDERED MACHINE WORKFLOW{programs.find((program) => program.workflow === currentGraph.name)?.status === 'design' ? ' · DRAFT' : ''}</div><h1>{currentGraph.description}</h1></div><div class="workflow-actions"><button on:click={() => addProcedureToWorkflow()}>+ Procedure at end</button><button class="primary">Validate workflow</button></div></div>
         <GraphCanvas graph={currentGraph} activeNode={currentSession.active_node} onSelect={selectNode} />
       </section>
-      <StateInspector node={currentNode} procedure={currentProcedure} selectedStateId={selectedState} onStateEdit={editState} onStateRename={renameState} onEdit={editNode} onValidate={validateCurrent} onSave={saveCurrent} />
+      {#if currentGraph.nodes.length}
+        <StateInspector node={currentNode} procedure={currentProcedure} selectedStateId={selectedState} onStateEdit={editState} onStateRename={renameState} onNodeEdit={editNodeMetadata} onNodeSave={saveNodeMetadata} onValidate={validateCurrent} onSave={saveCurrent} />
+      {:else}
+        <aside class="inspector"><div class="eyebrow">EMPTY WORKFLOW</div><h2>Start with a procedure</h2><p class="muted">Use “+ Procedure at end” to create or reuse the first procedure in this program.</p></aside>
+      {/if}
     </main>
   {/if}
 

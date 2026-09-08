@@ -136,6 +136,37 @@ class RuntimeProcedureTests(unittest.TestCase):
 
         self.assertEqual(session.status, "complete", session.snapshot())
 
+    def test_lme_workflow_completes_with_parallel_mash_heating(self):
+        workflow = load_yaml("lme_brewing.yml")
+        names = []
+        for step in workflow["steps"]:
+            if "procedure" in step:
+                names.append(step["procedure"])
+            else:
+                names.extend(branch["procedure"] for branch in step["parallel"]["branches"])
+        procedures = {name: load_yaml(f"{name}.yml") for name in names}
+        recipe = yaml.safe_load((RECIPE_ROOT / "lme_development.yml").read_text())
+        session = WorkflowSession(
+            workflow, procedures, recipe_global_values(recipe), SimulatedHAL(),
+            speed=120, autostart=False,
+        )
+
+        for _ in range(30000):
+            for item in session.active:
+                execution = item["execution"]
+                definition = execution._input_definition()
+                if definition and execution.waiting_for_input():
+                    session.provide_input(definition["key"], definition["options"][0], execution.name)
+                    break
+            session.tick(2)
+            if session.status in session.TERMINAL:
+                break
+
+        self.assertEqual(session.status, "complete", session.snapshot())
+        self.assertIn("lme_hopping", session.completed_nodes)
+        self.assertIn("heat_lme_mash_tank", session.completed_nodes)
+        self.assertIn("transfer_lme_to_boil", session.completed_nodes)
+
     def test_hardware_mode_uses_same_state_engine_and_safe_baseline(self):
         class RecordingBridge:
             def __init__(self):

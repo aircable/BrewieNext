@@ -140,6 +140,14 @@ class SimulatedHAL:
         self.operation = None
 
     def user_input(self, procedure, key, value, globals_snapshot):
+        if procedure == "prepare_lme_brew" and key == "lme_charges_loaded" and value == "loaded":
+            boil_volume = globals_snapshot.get("lme_boil_tank_volume_L")
+            mash_volume = globals_snapshot.get("lme_mash_tank_volume_L")
+            if isinstance(boil_volume, (int, float)):
+                self.sensors["boilVolumeL"] = float(boil_volume)
+            if isinstance(mash_volume, (int, float)):
+                self.sensors["mashVolumeL"] = float(mash_volume)
+            return
         if key != "manual_fill_done" or value != "done":
             return
         target_name = (

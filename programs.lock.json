@@ -1,7 +1,7 @@
 {
   "repository": "aircable/BrewieNextProcedures",
-  "version": "0.1.0",
-  "asset": "brewie_b20_standard_programs-0.1.0.tar.gz",
-  "url": "https://github.com/aircable/BrewieNextProcedures/releases/download/v0.1.0/brewie_b20_standard_programs-0.1.0.tar.gz",
-  "sha256": "c36e2f8b2d35bfeb726b25ffe104c6e59b2ccfd085d12f57f28b898474311859"
+  "version": "0.2.0",
+  "asset": "brewie_b20_standard_programs-0.2.0.tar.gz",
+  "url": "https://github.com/aircable/BrewieNextProcedures/releases/download/v0.2.0/brewie_b20_standard_programs-0.2.0.tar.gz",
+  "sha256": "0949671e594074ea355c12b0979e7f3c81950b689360254ada0eca0aeecfa5e8"
 }

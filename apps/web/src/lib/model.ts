@@ -22,10 +22,20 @@ export type GraphNode = {
 export type BrewGraph = {
   name: string;
   description: string;
+  default_recipe?: string;
   entry_point: string;
   source_format?: 'sequence' | 'graph';
   nodes: GraphNode[];
   edges: Edge[];
+};
+
+export type ProgramSummary = {
+  id: string;
+  label: string;
+  category: 'brewing' | 'cleaning' | 'maintenance' | 'diagnostics';
+  description: string;
+  status: 'design' | 'available';
+  workflow?: string;
 };
 
 export type ProcedureState = {
@@ -120,6 +130,7 @@ export type Recipe = {
 export const demoGraph: BrewGraph = {
   name: 'beer_brewing',
   description: 'Main BrewieNext ordered brewing workflow',
+  default_recipe: 'development_test',
   entry_point: 'prepare_brew',
   source_format: 'sequence',
   nodes: [

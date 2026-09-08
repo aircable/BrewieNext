@@ -1,4 +1,4 @@
-import { demoGraph, demoProcedure, type BrewGraph, type BrewieScreen, type ProcedureDocument, type Recipe, type RecipeSummary } from './model';
+import { demoGraph, demoProcedure, type BrewGraph, type BrewieScreen, type ProcedureDocument, type ProgramSummary, type Recipe, type RecipeSummary } from './model';
 import type { MachineStatus } from './simulation';
 
 export type RuntimeProcedure = {
@@ -54,12 +54,29 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export async function loadGraph(): Promise<BrewGraph> {
+export async function loadPrograms(): Promise<ProgramSummary[]> {
   try {
-    const result = await request<{ data: BrewGraph }>('/api/graphs/beer_brewing');
+    const result = await request<{ programs: ProgramSummary[] }>('/api/programs');
+    return result.programs;
+  } catch {
+    return [{
+      id: 'beer_brewing',
+      label: 'All-grain brewing',
+      category: 'brewing',
+      description: demoGraph.description,
+      status: 'available',
+      workflow: 'beer_brewing'
+    }];
+  }
+}
+
+export async function loadGraph(name = 'beer_brewing'): Promise<BrewGraph> {
+  try {
+    const result = await request<{ data: BrewGraph }>(`/api/graphs/${encodeURIComponent(name)}`);
     return result.data;
   } catch {
-    return demoGraph;
+    if (name === demoGraph.name) return demoGraph;
+    throw new Error(`Workflow '${name}' is not available`);
   }
 }
 
@@ -78,8 +95,16 @@ export async function removeWorkflowStep(graphName: string, stepId: string): Pro
   return result.data;
 }
 
-export async function resolveGraph(recipeId: string): Promise<BrewGraph> {
-  const result = await request<{ data: BrewGraph }>(`/api/graphs/beer_brewing/resolve?recipe=${encodeURIComponent(recipeId)}`);
+export async function updateWorkflowStep(graphName: string, stepId: string, changes: { label: string; description: string }): Promise<BrewGraph> {
+  const result = await request<{ data: BrewGraph }>(`/api/graphs/${encodeURIComponent(graphName)}/steps/${encodeURIComponent(stepId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(changes)
+  });
+  return result.data;
+}
+
+export async function resolveGraph(recipeId: string, graphName = 'beer_brewing'): Promise<BrewGraph> {
+  const result = await request<{ data: BrewGraph }>(`/api/graphs/${encodeURIComponent(graphName)}/resolve?recipe=${encodeURIComponent(recipeId)}`);
   return result.data;
 }
 
@@ -202,12 +227,13 @@ export async function sendMachineCommand(command: Record<string, unknown>): Prom
 export async function startRuntime(options: {
   mode: 'simulation' | 'hardware';
   recipe_id: string;
+  workflow?: string;
   speed?: number;
   confirm_hardware?: boolean;
 }): Promise<RuntimeStatus> {
   const result = await request<{ data: RuntimeStatus }>('/api/runtime/sessions', {
     method: 'POST',
-    body: JSON.stringify({ workflow: 'beer_brewing', ...options })
+    body: JSON.stringify({ workflow: options.workflow || 'beer_brewing', ...options })
   });
   return result.data;
 }

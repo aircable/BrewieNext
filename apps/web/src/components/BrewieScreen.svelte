@@ -90,10 +90,16 @@
         </div>
       {/if}
       <div class="procedure-button-block">
-        <div class="procedure-navigation">
-          <button data-touch-control="previous_procedure" class:pressed={activeControl === 'previous_procedure'} on:click={() => control('previous_procedure')}>PREVIOUS<br>PROCEDURE</button>
-          <button data-touch-control="next_procedure" class:pressed={activeControl === 'next_procedure'} on:click={() => control('next_procedure')}>NEXT<br>PROCEDURE</button>
-        </div>
+        {#if session.status === 'idle'}
+          <div class="procedure-navigation single">
+            <button data-touch-control="programs" class:pressed={activeControl === 'programs'} on:click={() => control('programs')}>← PROGRAMS</button>
+          </div>
+        {:else}
+          <div class="procedure-navigation">
+            <button data-touch-control="previous_procedure" class:pressed={activeControl === 'previous_procedure'} on:click={() => control('previous_procedure')}>PREVIOUS<br>PROCEDURE</button>
+            <button data-touch-control="next_procedure" class:pressed={activeControl === 'next_procedure'} on:click={() => control('next_procedure')}>NEXT<br>PROCEDURE</button>
+          </div>
+        {/if}
         <div class="screen-controls">
           <button data-touch-control={primaryControl} class:pressed={activeControl === primaryControl} on:click={() => control(primaryControl)}>{primaryLabel}</button>
           <button data-touch-control="abort" class:pressed={activeControl === 'abort'} class="danger" on:click={() => control('abort')}>ABORT</button>

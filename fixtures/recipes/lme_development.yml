@@ -1,0 +1,54 @@
+schema_version: 1
+id: lme_development
+name: LME 15 + 10 Development Brew
+description: Development recipe for the two-vessel Brewie liquid malt extract workflow.
+style: LME development brew
+batch_volume_L: 20
+water:
+  mash_volume_L: 15
+  sparge_volume_L: 10
+fermentables:
+  - name: Liquid malt extract - boil tank
+    amount_kg: 1
+  - name: Liquid malt extract - mash tank
+    amount_kg: 2
+mash:
+  mash_in_temperature_C: 80
+  steps:
+    - name: Unused by LME workflow
+      target_temperature_C: 80
+      duration_min: 1
+    - name: Unused by LME workflow
+      target_temperature_C: 80
+      duration_min: 1
+sparge:
+  target_temperature_C: 80
+  cycle_count: 1
+boil:
+  duration_min: 60
+  target_temperature_C: 100
+  hop_additions:
+    - cage: 1
+      hop: Bittering hop
+      amount_g: 20
+      minutes_remaining: 60
+    - cage: 2
+      hop: Mid-boil hop
+      amount_g: 15
+      minutes_remaining: 30
+    - cage: 3
+      hop: Aroma hop
+      amount_g: 15
+      minutes_remaining: 10
+    - cage: 4
+      hop: ''
+      amount_g: 0
+      minutes_remaining: 5
+cooling:
+  target_temperature_C: 25
+sedimentation:
+  duration_min: 20
+yeasts:
+  - name: Ale yeast
+    amount_g: 11.5
+notes: Mash and sparge recipe fields are storage-compatible aliases and are not executed by the LME workflow.

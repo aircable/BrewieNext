@@ -10,6 +10,7 @@ from editor_backend import (
     _resolve_procedure_path,
     _insert_workflow_step,
     _remove_workflow_step,
+    _update_workflow_step,
     app,
     recipe_global_values,
 )
@@ -71,6 +72,41 @@ class RecipeGlobalFillTests(unittest.TestCase):
     editor_root = Path(os.environ["PROCEDURES_DIR"])
     recipe_root = Path(os.environ["BUNDLED_RECIPES_DIR"])
 
+    def test_program_catalog_distinguishes_available_and_design_programs(self):
+        response = app.test_client().get("/api/programs")
+        self.assertEqual(response.status_code, 200)
+        programs = {program["id"]: program for program in response.get_json()["programs"]}
+        self.assertEqual(programs["beer_brewing"]["status"], "available")
+        self.assertEqual(programs["beer_brewing"]["workflow"], "beer_brewing")
+        self.assertEqual(programs["lme_brewing"]["status"], "design")
+        self.assertEqual(programs["lme_brewing"]["workflow"], "lme_brewing")
+        self.assertEqual(programs["cleaning_short"]["category"], "cleaning")
+
+    def test_design_program_can_be_edited_but_not_executed(self):
+        graph_response = app.test_client().get("/api/graphs/lme_brewing")
+        self.assertEqual(graph_response.status_code, 200)
+        self.assertEqual(graph_response.get_json()["data"]["source_format"], "sequence")
+        self.assertEqual(graph_response.get_json()["data"]["default_recipe"], "lme_development")
+        nodes = {node["id"]: node for node in graph_response.get_json()["data"]["nodes"]}
+        self.assertEqual(nodes["lme_hopping"]["parallel_group"], "hopping_and_mash_heating")
+        self.assertEqual(nodes["heat_lme_mash_tank"]["parallel_group"], "hopping_and_mash_heating")
+
+        resolve_response = app.test_client().get(
+            "/api/graphs/lme_brewing/resolve?recipe=lme_development"
+        )
+        self.assertEqual(resolve_response.status_code, 200)
+        self.assertEqual(
+            resolve_response.get_json()["global_values"]["lme_mash_target_temperature_C"],
+            80,
+        )
+
+        runtime_response = app.test_client().post(
+            "/api/runtime/sessions",
+            json={"workflow": "lme_brewing", "mode": "simulation"},
+        )
+        self.assertEqual(runtime_response.status_code, 400)
+        self.assertIn("still in design", runtime_response.get_json()["error"])
+
     def test_fill_procedures_use_recipe_globals_without_local_parameters(self):
         recipe = yaml.safe_load((self.recipe_root / "development_test.yml").read_text())
         globals_snapshot = recipe_global_values(recipe)
@@ -98,6 +134,9 @@ class RecipeGlobalFillTests(unittest.TestCase):
         payload = response.get_json()
         self.assertEqual(payload["global_values"]["mash_water_volume_L"], 15)
         self.assertEqual(payload["global_values"]["sparge_water_volume_L"], 10)
+        self.assertEqual(payload["global_values"]["lme_boil_tank_volume_L"], 15)
+        self.assertEqual(payload["global_values"]["lme_mash_tank_volume_L"], 10)
+        self.assertEqual(payload["global_values"]["lme_mash_target_temperature_C"], 78)
         self.assertEqual(payload["global_values"]["mash_rest_1_temperature_C"], 67)
         self.assertEqual(payload["global_values"]["mash_rest_2_temperature_C"], 76)
         self.assertEqual(payload["global_values"]["sparge_cycle_count"], 5)
@@ -283,6 +322,19 @@ class OrderedWorkflowMutationTests(unittest.TestCase):
         self.assertEqual(len(self.workflow["steps"]), 3)
         with self.assertRaisesRegex(ValueError, "parallel group"):
             _remove_workflow_step(self.workflow, "left")
+
+    def test_update_changes_metadata_without_changing_identity(self):
+        updated = _update_workflow_step(
+            self.workflow,
+            "left",
+            {"label": "Mash grains", "description": "Hold the mash at its rests."},
+        )
+        branch = updated["steps"][1]["parallel"]["branches"][0]
+        self.assertEqual(branch["id"], "left")
+        self.assertEqual(branch["procedure"], "left")
+        self.assertEqual(branch["label"], "Mash grains")
+        self.assertEqual(branch["description"], "Hold the mash at its rests.")
+        self.assertNotIn("label", self.workflow["steps"][1]["parallel"]["branches"][0])
 
 
 if __name__ == "__main__":
