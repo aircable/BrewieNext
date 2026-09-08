@@ -53,6 +53,11 @@ restart_services() {
   fi
 }
 
+install_landing_page() {
+  [ -f "$RELEASE/landing.html" ] || return 0
+  cp "$RELEASE/landing.html" "$BASE/index.html"
+}
+
 install_pinned_programs() {
   PROGRAM_BUNDLE="$RELEASE/program-bundle"
   [ -f "$PROGRAM_BUNDLE/version" ] || { echo "Release has no program version" >&2; exit 1; }
@@ -100,6 +105,8 @@ install_pinned_programs() {
 }
 
 if [ -e "$RELEASES/$VERSION" ]; then
+  RELEASE="$RELEASES/$VERSION"
+  install_landing_page
   activate_app
   restart_services
   echo "Activated existing BrewieNext release $VERSION"
@@ -115,6 +122,7 @@ RELEASE="$STAGE/$TOP"
 [ -f "$RELEASE/manifest.json" ] || { echo "Release has no manifest.json" >&2; exit 1; }
 
 install_pinned_programs
+install_landing_page
 mv "$RELEASE" "$RELEASES/$VERSION"
 activate_app
 trap - EXIT INT TERM

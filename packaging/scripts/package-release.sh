@@ -28,6 +28,7 @@ trap 'rm -rf "$WORK"' EXIT INT TERM
 PACKAGE_ROOT="$WORK/brewienext-$VERSION"
 mkdir -p "$PACKAGE_ROOT/backend" "$PACKAGE_ROOT/recipes" "$PACKAGE_ROOT/program-bundle"
 cp -R "$WEB_ROOT/dist/." "$PACKAGE_ROOT/"
+cp "$REPO_ROOT/packaging/relinux/usr/share/brewie/index.html" "$PACKAGE_ROOT/landing.html"
 cp "$RUNTIME_ROOT/editor_backend.py" \
   "$RUNTIME_ROOT/brewie_procedure_validation.py" \
   "$RUNTIME_ROOT/avr_serial.py" \

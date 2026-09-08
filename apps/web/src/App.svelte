@@ -141,15 +141,19 @@
     }
     try {
       const loadedGraph = await loadGraph(program.workflow);
+      const firstNode = loadedGraph.nodes[0];
+      const [loadedRecipe, loadedProcedure] = await Promise.all([
+        loadedGraph.default_recipe ? loadRecipe(loadedGraph.default_recipe) : Promise.resolve(null),
+        firstNode ? loadProcedure(firstNode.procedure) : Promise.resolve(null)
+      ]);
       graph.set(loadedGraph);
-      if (loadedGraph.default_recipe) {
-        currentRecipe = await loadRecipe(loadedGraph.default_recipe);
+      if (loadedRecipe) {
+        currentRecipe = loadedRecipe;
         recipeDirty = false;
       }
-      const firstNode = loadedGraph.nodes[0];
       if (firstNode) {
         selectedNode.set(firstNode);
-        selectedProcedure.set(await loadProcedure(firstNode.procedure));
+        selectedProcedure.set(loadedProcedure);
       } else {
         selectedProcedure.set(null);
       }

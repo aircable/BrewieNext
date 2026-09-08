@@ -2,7 +2,19 @@
   import type { ProgramSummary } from '../lib/model';
 
   export let programs: ProgramSummary[] = [];
-  export let onOpen: (program: ProgramSummary) => void;
+  export let onOpen: (program: ProgramSummary) => void | Promise<void>;
+
+  let loadingProgram = '';
+
+  async function open(program: ProgramSummary) {
+    if (loadingProgram) return;
+    loadingProgram = program.id;
+    try {
+      await onOpen(program);
+    } finally {
+      loadingProgram = '';
+    }
+  }
 
   const categoryLabels: Record<ProgramSummary['category'], string> = {
     brewing: 'Brewing',
@@ -31,7 +43,9 @@
           <button
             class:program-available={program.status === 'available'}
             class="program-card"
-            on:click={() => onOpen(program)}
+            class:pressed={loadingProgram === program.id}
+            disabled={Boolean(loadingProgram)}
+            on:click={() => open(program)}
             aria-label={`${program.label}, ${program.status === 'available' ? 'available' : 'in design'}`}
           >
             <span class:available={program.status === 'available'} class="program-status">
@@ -39,7 +53,7 @@
             </span>
             <strong>{program.label}</strong>
             <p>{program.description}</p>
-            <small>{program.status === 'available' ? 'Open workflow →' : 'Open draft workflow →'}</small>
+            <small>{loadingProgram === program.id ? 'Opening workflow…' : program.status === 'available' ? 'Open workflow →' : 'Open draft workflow →'}</small>
           </button>
         {/each}
       </div>

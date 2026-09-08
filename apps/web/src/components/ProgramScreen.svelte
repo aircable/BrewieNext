@@ -2,9 +2,10 @@
   import type { ProgramSummary } from '../lib/model';
 
   export let programs: ProgramSummary[] = [];
-  export let onSelect: (program: ProgramSummary) => void;
+  export let onSelect: (program: ProgramSummary) => void | Promise<void>;
 
   let activeProgram = '';
+  let loadingProgram = '';
   let touchMarker = { visible: false, x: 0, y: 0 };
   const categoryLabels: Record<ProgramSummary['category'], string> = {
     brewing: 'BREWING',
@@ -14,13 +15,16 @@
   };
   $: categories = [...new Set(programs.map((program) => program.category))];
 
-  function select(program: ProgramSummary) {
-    if (program.status !== 'available') return;
+  async function select(program: ProgramSummary) {
+    if (program.status !== 'available' || loadingProgram) return;
     activeProgram = program.id;
-    window.setTimeout(() => {
-      if (activeProgram === program.id) activeProgram = '';
-    }, 180);
-    onSelect(program);
+    loadingProgram = program.id;
+    try {
+      await onSelect(program);
+    } finally {
+      activeProgram = '';
+      loadingProgram = '';
+    }
   }
 
   function offsetWithinScreen(element: HTMLElement, screen: HTMLElement) {
@@ -78,11 +82,11 @@
               data-touch-control={`program:${program.id}`}
               class:pressed={activeProgram === program.id}
               class:planned={program.status !== 'available'}
-              disabled={program.status !== 'available'}
+              disabled={program.status !== 'available' || Boolean(loadingProgram)}
               on:click={() => select(program)}
             >
               <strong>{program.label}</strong>
-              <span>{program.status === 'available' ? 'OPEN' : 'IN DESIGN'}</span>
+              <span>{loadingProgram === program.id ? 'OPENING…' : program.status === 'available' ? 'OPEN' : 'IN DESIGN'}</span>
             </button>
           {/each}
         </div>
