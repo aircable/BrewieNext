@@ -5,6 +5,7 @@ ARCHIVE=${1:?Usage: brewie-install-release package.tar.gz}
 BASE=${BREWIE_RELEASE_ROOT:-/usr/share/brewie}
 RELEASES="$BASE/releases"
 PROGRAM_BASE=${BREWIE_PROGRAM_ROOT:-/var/lib/brewie/programs}
+MACHINE_CONFIG_DIR=${BREWIE_MACHINE_CONFIG_DIR:-/etc/brewie}
 [ -f "$ARCHIVE" ] || { echo "Package not found: $ARCHIVE" >&2; exit 1; }
 
 case "$ARCHIVE" in
@@ -27,7 +28,7 @@ case "$VERSION" in
   ''|*[!A-Za-z0-9._-]*) echo "Invalid release version: $VERSION" >&2; exit 1 ;;
 esac
 
-mkdir -p "$RELEASES"
+mkdir -p "$RELEASES" "$MACHINE_CONFIG_DIR"
 
 activate_app() {
   rm -f "$BASE/.current.new"

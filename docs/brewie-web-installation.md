@@ -40,6 +40,10 @@ reuse another machine's load-cell calibration. The required properties are
 `toLiter`, `toLiterNull`, `mashTemperatureDelta`, and
 `boilTemperatureDelta`; `boilingPoint` defaults to 100 °C.
 
+The application release installer creates `/etc/brewie` when it is absent but
+never creates or overwrites `machine.json`. Back up and restore that file when
+reflashing the SD card.
+
 The backend uses AVR mode `auto` on the appliance. At startup it sends `P999`,
 waits for the following status record to confirm that physical valve movement
 has finished, then sends `P80` with this calibration to power on and initialize
