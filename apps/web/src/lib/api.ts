@@ -54,11 +54,12 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export async function loadPrograms(): Promise<ProgramSummary[]> {
+export async function loadPrograms(useFallback = true): Promise<ProgramSummary[]> {
   try {
     const result = await request<{ programs: ProgramSummary[] }>('/api/programs');
     return result.programs;
-  } catch {
+  } catch (error) {
+    if (!useFallback) throw error;
     return [{
       id: 'beer_brewing',
       label: 'All-grain brewing',

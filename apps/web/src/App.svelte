@@ -73,6 +73,16 @@
     loadPrograms()
       .then((value) => (programs = value))
       .catch((error) => debug(`PROGRAM ERROR: ${error instanceof Error ? error.message : String(error)}`));
+    const refreshProgramCatalog = async () => {
+      try {
+        programs = await loadPrograms(false);
+        window.clearInterval(programTimer);
+        debug(`Program catalog connected: ${programs.length} programs`);
+      } catch (error) {
+        debug(`PROGRAM RETRY: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    };
+    const programTimer = window.setInterval(refreshProgramCatalog, 2000);
     loadRecipes()
       .then(async (value) => {
         recipes = value;
@@ -86,6 +96,7 @@
     return () => {
       window.removeEventListener('beforeunload', warnBeforeUnload);
       window.clearInterval(runtimeTimer);
+      window.clearInterval(programTimer);
       unsubscribe.forEach((stop) => stop());
     };
   });
