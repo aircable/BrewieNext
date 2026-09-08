@@ -36,22 +36,30 @@ export type RuntimeStatus = {
 const API_BASE = import.meta.env.VITE_API_BASE_URL ||
   (import.meta.env.DEV ? '' : `http://${window.location.hostname}:8081`);
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options
+function request<T>(path: string, options?: RequestInit): Promise<T> {
+  // The target's Qt WebKit predates fetch(). XMLHttpRequest keeps the real
+  // touchscreen and the desktop preview on the same API transport.
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(options?.method || 'GET', `${API_BASE}${path}`, true);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.onreadystatechange = () => {
+      if (xhr.readyState !== 4) return;
+      let payload: any = null;
+      try {
+        payload = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+      } catch {
+        // Preserve the HTTP status when an older backend returns no JSON body.
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(payload as T);
+        return;
+      }
+      reject(new Error(payload?.error || `${xhr.status || 0} ${xhr.statusText || 'API request failed'}`));
+    };
+    xhr.onerror = () => reject(new Error('API connection failed'));
+    xhr.send(typeof options?.body === 'string' ? options.body : null);
   });
-  if (!response.ok) {
-    let detail = '';
-    try {
-      const payload = await response.json() as { error?: string };
-      detail = payload.error || '';
-    } catch {
-      // Preserve the HTTP status when an older backend returns no JSON body.
-    }
-    throw new Error(detail || `${response.status} ${response.statusText}`);
-  }
-  return response.json() as Promise<T>;
 }
 
 export async function loadPrograms(useFallback = true): Promise<ProgramSummary[]> {
