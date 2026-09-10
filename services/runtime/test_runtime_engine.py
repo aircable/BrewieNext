@@ -1,4 +1,5 @@
 import os
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -7,7 +8,7 @@ import yaml
 
 from editor_backend import RuntimeManager, _resolve_procedure_path, app, recipe_global_values
 from hardware_registry import HardwareRegistry
-from runtime_engine import AvrHAL, ProcedureExecution, SimulatedHAL, WorkflowSession
+from runtime_engine import AvrHAL, ProcedureExecution, RuntimeEngineError, SimulatedHAL, WorkflowSession
 
 
 EDITOR_ROOT = Path(os.environ["PROCEDURES_DIR"])
@@ -258,6 +259,66 @@ class RuntimeProcedureTests(unittest.TestCase):
 
 
 class RuntimeApiTests(unittest.TestCase):
+    def test_manager_rejects_stale_commands_and_replays_command_ids_once(self):
+        procedure = {
+            "name": "wait", "start_state": "active",
+            "states": {"active": {"action": [], "transition": [{"default": "loops"}]}},
+        }
+        manager = RuntimeManager(None)
+        manager.start(
+            {"name": "test", "steps": [{"id": "wait", "procedure": "wait"}]},
+            {"wait": procedure}, {}, mode="simulation", speed=1,
+        )
+        revision = manager.snapshot("browser-1")["revision"]
+        calls = []
+        manager.command("browser-1", "pause-1", revision, lambda: calls.append("pause"))
+        manager.command("browser-1", "pause-1", revision, lambda: calls.append("duplicate"))
+        self.assertEqual(calls, ["pause"])
+        with self.assertRaisesRegex(RuntimeEngineError, "Session changed"):
+            manager.command("browser-1", "pause-2", revision, lambda: None)
+        manager.session.abort()
+
+    def test_remote_control_requires_touchscreen_permission(self):
+        manager = RuntimeManager(None)
+        with self.assertRaisesRegex(RuntimeEngineError, "view-only"):
+            manager.authorize("browser-1", "browser", False)
+        pending = manager.request_control("browser-1", "Kitchen laptop")
+        manager.permit_control(pending["id"], True, 900)
+        manager.authorize("browser-1", "browser", False)
+        manager.authorize("kiosk-1", "kiosk", True)
+
+    def test_hardware_checkpoint_returns_as_interrupted_after_restart(self):
+        class RecordingBridge:
+            def __init__(self):
+                self.registry = HardwareRegistry()
+            def status(self):
+                return {"connected": True, "sensors": {}, "valves": {}, "pumps": {}, "heaters": {}}
+            def prepare_hardware_session(self): pass
+            def close_all(self): pass
+            def set_device(self, *_): pass
+            def set_heater_target(self, *_): pass
+            def reset_level(self): pass
+            def send_payload(self, *_): pass
+
+        procedure = {
+            "name": "wait", "start_state": "active",
+            "states": {"active": {"action": [], "transition": [{"default": "loops"}]}},
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            state_file = str(Path(directory) / "runtime.json")
+            first = RuntimeManager(RecordingBridge(), state_file)
+            first.start(
+                {"name": "hardware_test", "steps": [{"id": "wait", "procedure": "wait"}]},
+                {"wait": procedure}, {}, mode="hardware", speed=1,
+            )
+            first.snapshot("kiosk", "kiosk", True)
+            restored = RuntimeManager(RecordingBridge(), state_file)
+            snapshot = restored.snapshot("kiosk", "kiosk", True)
+            self.assertEqual(snapshot["status"], "interrupted")
+            self.assertEqual(snapshot["active_procedure"], "wait")
+            first.session.abort()
+            first._write_state()
+
     def test_simulation_session_api_uses_yaml_transition(self):
         manager = RuntimeManager(None)
         with patch("editor_backend.RUNTIME_MANAGER", manager):

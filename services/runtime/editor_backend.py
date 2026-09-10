@@ -69,6 +69,7 @@ RECIPES_DIR = os.environ.get("RECIPES_DIR", BUNDLED_RECIPES_DIR)
 UI_STATE_FILE  = os.environ.get("UI_STATE_FILE", "/tmp/brewie-editor/ui_state.json")
 AVR_DEVICE = os.environ.get("BREWIE_AVR_DEVICE", "/dev/ttyS1")
 AVR_STATE_FILE = os.environ.get("BREWIE_AVR_STATE_FILE", "/var/lib/brewie/avr_state.json")
+RUNTIME_STATE_FILE = os.environ.get("BREWIE_RUNTIME_STATE_FILE", "/var/lib/brewie/runtime-session.json")
 AVR_SAFE_START = os.environ.get("BREWIE_AVR_SAFE_START", "1").lower() in {"1", "true", "yes"}
 AVR_CALIBRATION_FILE = os.environ.get("BREWIE_AVR_CALIBRATION_FILE", "/etc/brewie/machine.json")
 if not os.path.isfile(AVR_CALIBRATION_FILE) and "BREWIE_AVR_CALIBRATION_FILE" not in os.environ:
@@ -96,7 +97,15 @@ AVR_BRIDGE = AvrSerialBridge(
     safe_start=AVR_SAFE_START,
     calibration=AVR_CALIBRATION,
 )
-RUNTIME_MANAGER = RuntimeManager(AVR_BRIDGE)
+RUNTIME_MANAGER = RuntimeManager(AVR_BRIDGE, RUNTIME_STATE_FILE)
+
+
+@app.after_request
+def disable_runtime_caching(response):
+    if request.path.startswith("/api/runtime/"):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+    return response
 
 # ─── Schema Loading ────────────────────────────────────────────────────────
 
@@ -2041,6 +2050,32 @@ def _require_local_runtime_command():
     return None
 
 
+def _runtime_client(body=None):
+    body = body or {}
+    client_id = body.get("client_id") or request.args.get("client_id") or request.headers.get("X-Brewie-Client", "")
+    is_loopback = request.remote_addr in {"127.0.0.1", "::1"}
+    client_kind = body.get("client_kind") or request.args.get("client_kind") or request.headers.get("X-Brewie-Client-Kind")
+    if not client_kind:
+        client_kind = "kiosk" if is_loopback else "browser"
+    return client_id, client_kind, is_loopback
+
+
+def _authorize_runtime(body, force=False):
+    client_id, client_kind, is_loopback = _runtime_client(body)
+    session = RUNTIME_MANAGER.session
+    if force or (session and session.mode == "hardware") or RUNTIME_MANAGER.interrupted:
+        RUNTIME_MANAGER.authorize(client_id, client_kind, is_loopback)
+    return client_id, client_kind, is_loopback
+
+
+def _runtime_command(body, callback, force_authorization=False):
+    client_id, client_kind, is_loopback = _authorize_runtime(body, force_authorization)
+    RUNTIME_MANAGER.command(
+        client_id, body.get("command_id"), body.get("expected_revision"), callback
+    )
+    return RUNTIME_MANAGER.snapshot(client_id, client_kind, is_loopback)
+
+
 @app.route("/api/runtime/sessions", methods=["POST"])
 def api_start_runtime_session():
     """Start the authoritative workflow engine in simulation or hardware mode."""
@@ -2061,11 +2096,15 @@ def api_start_runtime_session():
         workflow, procedures, globals_snapshot = _runtime_bundle(
             workflow_name, body.get("recipe_id")
         )
-        session = RUNTIME_MANAGER.start(
-            workflow, procedures, globals_snapshot,
-            mode=mode, speed=body.get("speed", 60),
+        snapshot = _runtime_command(
+            body,
+            lambda: RUNTIME_MANAGER.start(
+                workflow, procedures, globals_snapshot,
+                mode=mode, speed=body.get("speed", 60),
+            ),
+            force_authorization=mode == "hardware",
         )
-        return jsonify({"data": session.snapshot()}), 201
+        return jsonify({"data": snapshot}), 201
     except RuntimeEngineError as error:
         status = 409 if "already active" in str(error) else 503 if "not connected" in str(error) else 400
         return jsonify({"error": str(error)}), status
@@ -2073,10 +2112,54 @@ def api_start_runtime_session():
 
 @app.route("/api/runtime/session", methods=["GET"])
 def api_get_runtime_session():
+    client_id, client_kind, is_loopback = _runtime_client()
+    return jsonify({"data": RUNTIME_MANAGER.snapshot(client_id, client_kind, is_loopback)})
+
+
+@app.route("/api/runtime/control/request", methods=["POST"])
+def api_request_runtime_control():
+    denied = _require_local_runtime_command()
+    if denied:
+        return denied
+    body = request.get_json(silent=True) or {}
+    client_id, client_kind, _ = _runtime_client(body)
+    if client_kind == "kiosk":
+        return jsonify({"error": "The touchscreen already has control"}), 400
     try:
-        return jsonify({"data": RUNTIME_MANAGER.require().snapshot()})
+        pending = RUNTIME_MANAGER.request_control(client_id, body.get("label", "Remote browser"))
+        return jsonify({"data": pending}), 202
     except RuntimeEngineError as error:
-        return jsonify({"error": str(error)}), 404
+        return jsonify({"error": str(error)}), 400
+
+
+@app.route("/api/runtime/control/permit", methods=["POST"])
+def api_permit_runtime_control():
+    denied = _require_local_runtime_command()
+    if denied:
+        return denied
+    body = request.get_json(silent=True) or {}
+    client_id, client_kind, is_loopback = _runtime_client(body)
+    if client_kind != "kiosk" or not is_loopback:
+        return jsonify({"error": "Browser control can only be approved on the touchscreen"}), 403
+    try:
+        RUNTIME_MANAGER.permit_control(
+            body.get("request_id"), body.get("allow") is True, body.get("duration_s", 900)
+        )
+        return jsonify({"data": RUNTIME_MANAGER.snapshot(client_id, client_kind, is_loopback)})
+    except RuntimeEngineError as error:
+        return jsonify({"error": str(error)}), 409
+
+
+@app.route("/api/runtime/session/recover", methods=["POST"])
+def api_recover_runtime_session():
+    body = request.get_json(silent=True) or {}
+    try:
+        snapshot = _runtime_command(
+            body, lambda: RUNTIME_MANAGER.recover(body.get("action")), force_authorization=True
+        )
+        return jsonify({"data": snapshot})
+    except RuntimeEngineError as error:
+        return jsonify({"error": str(error)}), 409
 
 
 @app.route("/api/runtime/session/control", methods=["POST"])
@@ -2087,18 +2170,14 @@ def api_control_runtime_session():
     body = request.get_json(silent=True) or {}
     action = body.get("action")
     try:
-        session = RUNTIME_MANAGER.require()
-        if action == "pause":
-            session.pause()
-        elif action == "resume":
-            session.resume()
-        elif action == "abort":
-            session.abort()
-        elif action == "set_speed":
-            session.set_speed(body.get("speed"))
-        else:
-            return jsonify({"error": "Action must be pause, resume, abort, or set_speed"}), 400
-        return jsonify({"data": session.snapshot()})
+        def perform():
+            session = RUNTIME_MANAGER.require()
+            if action == "pause": session.pause()
+            elif action == "resume": session.resume()
+            elif action == "abort": session.abort()
+            elif action == "set_speed": session.set_speed(body.get("speed"))
+            else: raise RuntimeEngineError("Action must be pause, resume, abort, or set_speed")
+        return jsonify({"data": _runtime_command(body, perform)})
     except RuntimeEngineError as error:
         return jsonify({"error": str(error)}), 409
 
@@ -2110,9 +2189,9 @@ def api_runtime_input():
         return denied
     body = request.get_json(silent=True) or {}
     try:
-        session = RUNTIME_MANAGER.require()
-        session.provide_input(body.get("key"), body.get("value"), body.get("procedure"))
-        return jsonify({"data": session.snapshot()})
+        return jsonify({"data": _runtime_command(body, lambda: RUNTIME_MANAGER.require().provide_input(
+            body.get("key"), body.get("value"), body.get("procedure")
+        ))})
     except RuntimeEngineError as error:
         return jsonify({"error": str(error)}), 409
 
@@ -2127,9 +2206,9 @@ def api_runtime_navigate():
     if direction not in {"previous", "next"}:
         return jsonify({"error": "Direction must be previous or next"}), 400
     try:
-        session = RUNTIME_MANAGER.require()
-        session.navigate(direction)
-        return jsonify({"data": session.snapshot()})
+        return jsonify({"data": _runtime_command(
+            body, lambda: RUNTIME_MANAGER.require().navigate(direction)
+        )})
     except RuntimeEngineError as error:
         return jsonify({"error": str(error)}), 409
 
@@ -2156,33 +2235,52 @@ def api_machine_command():
         return jsonify({"error": "A JSON command object is required"}), 400
     session = RUNTIME_MANAGER.session
     hal = session.hal if session and session.mode == "simulation" else None
+    if hal is None:
+        try:
+            client_id, client_kind, is_loopback = _runtime_client(command)
+            RUNTIME_MANAGER.authorize(client_id, client_kind, is_loopback)
+        except RuntimeEngineError as error:
+            return jsonify({"error": str(error)}), 403
     if hal is None and not AVR_BRIDGE.status()["connected"]:
         return jsonify({"error": "AVR serial status is not available"}), 503
     try:
         operation = command.get("command")
         device = command.get("device")
         action = command.get("action", "toggle")
-        if operation == "close_all":
-            (hal.close_all if hal else AVR_BRIDGE.close_all)()
-        elif operation == "reset_level":
-            (hal.reset_level if hal else AVR_BRIDGE.reset_level)()
-        elif device in {"mash_heater", "boil_heater"}:
-            if "target_C" not in command:
-                return jsonify({"error": "Heater commands require target_C"}), 400
-            (hal.set_heater_target if hal else AVR_BRIDGE.set_heater_target)(device, command["target_C"])
-        elif device == "cool_valve":
-            if hal:
-                hal.set_device("cooling_water_inlet_valve", action)
-                hal.set_device("wort_cooling_valve", action)
-            else:
-                AVR_BRIDGE.set_cooling_path(action)
-        elif isinstance(device, str):
-            (hal.set_device if hal else AVR_BRIDGE.set_device)(device, action)
-        else:
+        if device in {"mash_heater", "boil_heater"} and "target_C" not in command:
+            return jsonify({"error": "Heater commands require target_C"}), 400
+        if operation not in {"close_all", "reset_level"} and not isinstance(device, str):
             return jsonify({"error": "Unknown machine command"}), 400
+
+        def perform():
+            if operation == "close_all":
+                (hal.close_all if hal else AVR_BRIDGE.close_all)()
+            elif operation == "reset_level":
+                (hal.reset_level if hal else AVR_BRIDGE.reset_level)()
+            elif device in {"mash_heater", "boil_heater"}:
+                (hal.set_heater_target if hal else AVR_BRIDGE.set_heater_target)(device, command["target_C"])
+            elif device == "cool_valve":
+                if hal:
+                    hal.set_device("cooling_water_inlet_valve", action)
+                    hal.set_device("wort_cooling_valve", action)
+                else:
+                    AVR_BRIDGE.set_cooling_path(action)
+            else:
+                (hal.set_device if hal else AVR_BRIDGE.set_device)(device, action)
+
+        if session or hal is None:
+            client_id, _, _ = _runtime_client(command)
+            RUNTIME_MANAGER.command(
+                client_id, command.get("command_id"), command.get("expected_revision"), perform
+            )
+        else:
+            perform()
     except (AvrSerialError, RuntimeEngineError) as error:
         return jsonify({"error": str(error)}), 502
-    return jsonify({"data": hal.status() if hal else AVR_BRIDGE.status()})
+    return jsonify({
+        "data": hal.status() if hal else AVR_BRIDGE.status(),
+        "runtime_revision": RUNTIME_MANAGER.revision,
+    })
 
 
 @app.route("/api/health", methods=["GET"])

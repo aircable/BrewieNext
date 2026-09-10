@@ -62,7 +62,7 @@ export type BrewieScreen = {
   title: string;
   message: string;
   footer_message: string;
-  status: 'idle' | 'running' | 'waiting_for_input' | 'paused' | 'error' | 'complete';
+  status: 'idle' | 'running' | 'waiting_for_input' | 'paused' | 'error' | 'complete' | 'interrupted';
   readouts: { label: string; value: string; unit?: string }[];
   choices: { value: string; label: string }[];
   progress: number | null;

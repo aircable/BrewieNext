@@ -13,12 +13,13 @@ export type RuntimeProcedure = {
 };
 
 export type RuntimeStatus = {
-  id: string;
-  mode: 'simulation' | 'hardware';
-  status: 'running' | 'waiting_for_input' | 'paused' | 'complete' | 'error' | 'aborted';
+  id: string | null;
+  mode: 'simulation' | 'hardware' | null;
+  status: 'idle' | 'running' | 'waiting_for_input' | 'paused' | 'complete' | 'error' | 'aborted' | 'interrupted';
+  revision: number;
   speed: number;
   elapsed_s: number;
-  workflow: string;
+  workflow: string | null;
   step_index: number;
   step_count: number;
   active_nodes: string[];
@@ -29,12 +30,43 @@ export type RuntimeStatus = {
   screen: BrewieScreen;
   machine: MachineStatus;
   error: string | null;
+  control: {
+    can_control: boolean;
+    controller: 'touchscreen' | 'browser' | null;
+    lease_expires_at: number | null;
+    pending_request: { id: string; client_id: string; label: string; requested_at: number } | null;
+  };
 };
 
 // Static assets are served on 8080. The optional Flask editor API uses 8081
 // so the two services can run independently on the embedded image.
 const API_BASE = import.meta.env.VITE_API_BASE_URL ||
   (import.meta.env.DEV ? '' : `http://${window.location.hostname}:8081`);
+
+const CLIENT_KIND = typeof window !== 'undefined' && window.location.search.indexOf('kiosk=1') !== -1 ? 'kiosk' : 'browser';
+let clientId = '';
+let runtimeRevision: number | null = null;
+if (typeof window !== 'undefined') {
+  try { clientId = window.localStorage.getItem('brewie-client-id') || ''; } catch { /* old kiosk storage may be disabled */ }
+  if (!clientId) {
+    clientId = `${CLIENT_KIND}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    try { window.localStorage.setItem('brewie-client-id', clientId); } catch { /* keep in memory */ }
+  }
+}
+
+function commandMeta() {
+  return {
+    client_id: clientId,
+    client_kind: CLIENT_KIND,
+    command_id: `${clientId}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    expected_revision: runtimeRevision
+  };
+}
+
+function rememberRuntime(status: RuntimeStatus): RuntimeStatus {
+  runtimeRevision = status.revision;
+  return status;
+}
 
 function request<T>(path: string, options?: RequestInit): Promise<T> {
   // The target's Qt WebKit predates fetch(). XMLHttpRequest keeps the real
@@ -226,10 +258,11 @@ export async function loadMachineStatus(): Promise<MachineStatus | null> {
 }
 
 export async function sendMachineCommand(command: Record<string, unknown>): Promise<MachineStatus> {
-  const result = await request<{ data: MachineStatus }>('/api/machine/command', {
+  const result = await request<{ data: MachineStatus; runtime_revision?: number }>('/api/machine/command', {
     method: 'POST',
-    body: JSON.stringify(command)
+    body: JSON.stringify({ ...command, ...commandMeta() })
   });
+  if (typeof result.runtime_revision === 'number') runtimeRevision = result.runtime_revision;
   return result.data;
 }
 
@@ -242,42 +275,59 @@ export async function startRuntime(options: {
 }): Promise<RuntimeStatus> {
   const result = await request<{ data: RuntimeStatus }>('/api/runtime/sessions', {
     method: 'POST',
-    body: JSON.stringify({ workflow: options.workflow || 'beer_brewing', ...options })
+    body: JSON.stringify({ workflow: options.workflow || 'beer_brewing', ...options, ...commandMeta() })
   });
-  return result.data;
+  return rememberRuntime(result.data);
 }
 
-export async function loadRuntimeStatus(): Promise<RuntimeStatus | null> {
-  try {
-    const result = await request<{ data: RuntimeStatus }>('/api/runtime/session');
-    return result.data;
-  } catch {
-    return null;
-  }
+export async function loadRuntimeStatus(): Promise<RuntimeStatus> {
+  const query = `client_id=${encodeURIComponent(clientId)}&client_kind=${CLIENT_KIND}&_=${Date.now()}`;
+  const result = await request<{ data: RuntimeStatus }>(`/api/runtime/session?${query}`);
+  return rememberRuntime(result.data);
 }
 
 export async function controlRuntime(action: 'pause' | 'resume' | 'abort' | 'set_speed', speed?: number): Promise<RuntimeStatus> {
   const result = await request<{ data: RuntimeStatus }>('/api/runtime/session/control', {
     method: 'POST',
-    body: JSON.stringify({ action, ...(speed === undefined ? {} : { speed }) })
+    body: JSON.stringify({ action, ...(speed === undefined ? {} : { speed }), ...commandMeta() })
   });
-  return result.data;
+  return rememberRuntime(result.data);
 }
 
 export async function provideRuntimeInput(key: string, value: string, procedure?: string): Promise<RuntimeStatus> {
   const result = await request<{ data: RuntimeStatus }>('/api/runtime/session/input', {
     method: 'POST',
-    body: JSON.stringify({ key, value, ...(procedure ? { procedure } : {}) })
+    body: JSON.stringify({ key, value, ...(procedure ? { procedure } : {}), ...commandMeta() })
   });
-  return result.data;
+  return rememberRuntime(result.data);
 }
 
 export async function navigateRuntime(direction: 'previous' | 'next'): Promise<RuntimeStatus> {
   const result = await request<{ data: RuntimeStatus }>('/api/runtime/session/navigate', {
     method: 'POST',
-    body: JSON.stringify({ direction })
+    body: JSON.stringify({ direction, ...commandMeta() })
   });
-  return result.data;
+  return rememberRuntime(result.data);
+}
+
+export async function requestRuntimeControl(): Promise<void> {
+  await request('/api/runtime/control/request', {
+    method: 'POST', body: JSON.stringify({ client_id: clientId, client_kind: CLIENT_KIND, label: window.location.host })
+  });
+}
+
+export async function permitRuntimeControl(requestId: string, allow: boolean): Promise<RuntimeStatus> {
+  const result = await request<{ data: RuntimeStatus }>('/api/runtime/control/permit', {
+    method: 'POST', body: JSON.stringify({ request_id: requestId, allow, duration_s: 900, ...commandMeta() })
+  });
+  return rememberRuntime(result.data);
+}
+
+export async function recoverRuntime(action: 'discard' | 'restart_current_procedure'): Promise<RuntimeStatus> {
+  const result = await request<{ data: RuntimeStatus }>('/api/runtime/session/recover', {
+    method: 'POST', body: JSON.stringify({ action, ...commandMeta() })
+  });
+  return rememberRuntime(result.data);
 }
 
 function toWireProcedure(data: ProcedureDocument): Record<string, unknown> {

@@ -31,6 +31,7 @@ case "$1" in
     export BREWIE_AVR_ENABLED="${BREWIE_AVR_ENABLED:-auto}"
     export BREWIE_AVR_DEVICE="${BREWIE_AVR_DEVICE:-/dev/ttyS1}"
     export BREWIE_AVR_STATE_FILE="${BREWIE_AVR_STATE_FILE:-/var/lib/brewie/avr_state.json}"
+    export BREWIE_RUNTIME_STATE_FILE="${BREWIE_RUNTIME_STATE_FILE:-/var/lib/brewie/runtime-session.json}"
     export BREWIE_AVR_SAFE_START="${BREWIE_AVR_SAFE_START:-1}"
     export BREWIE_AVR_CALIBRATION_FILE="${BREWIE_AVR_CALIBRATION_FILE:-/etc/brewie/machine.json}"
     mkdir -p "$RECIPES_DIR"

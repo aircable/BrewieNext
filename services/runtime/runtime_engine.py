@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import os
 import re
 import threading
 import time
@@ -883,6 +885,13 @@ class WorkflowSession:
                 screen["readouts"] = []
                 screen.pop("readout_definitions", None)
             active_nodes = [item["node"]["id"] for item in self.active]
+            if self.status == "error":
+                screen.update({
+                    "title": "Brew stopped",
+                    "message": self.error or (primary or {}).get("error") or "The procedure failed.",
+                    "footer_message": "All outputs were closed. Review the error before continuing.",
+                    "choices": [],
+                })
             return {
                 "id": self.id,
                 "mode": self.mode,
@@ -910,10 +919,174 @@ class WorkflowSession:
 class RuntimeManager:
     """Own the single machine-wide workflow session."""
 
-    def __init__(self, avr_bridge):
+    def __init__(self, avr_bridge, state_file=None):
         self.avr_bridge = avr_bridge
         self.session = None
-        self._lock = threading.Lock()
+        self.state_file = state_file
+        self.interrupted = None
+        self.revision = 0
+        self._fingerprint = None
+        self._commands = {}
+        self._pending_control = None
+        self._browser_lease = None
+        self._lock = threading.RLock()
+        self._load_interrupted()
+
+    def _load_interrupted(self):
+        if not self.state_file:
+            return
+        try:
+            with open(self.state_file, "r", encoding="utf-8") as source:
+                saved = json.load(source)
+            snapshot = saved.get("snapshot", {})
+            if saved.get("mode") == "hardware" and snapshot.get("status") not in WorkflowSession.TERMINAL:
+                self.interrupted = saved
+                self.revision = int(snapshot.get("revision", 0)) + 1
+        except (OSError, ValueError, TypeError):
+            self.interrupted = None
+
+    def _write_state(self):
+        if not self.state_file:
+            return
+        if self.interrupted and not self.session:
+            return
+        if not self.session or self.session.mode != "hardware" or self.session.status in WorkflowSession.TERMINAL:
+            try:
+                os.unlink(self.state_file)
+            except FileNotFoundError:
+                pass
+            return
+        payload = {
+            "version": 1,
+            "mode": self.session.mode,
+            "snapshot": {**self.session.snapshot(), "revision": self.revision},
+            "workflow": self.session.workflow,
+            "procedures": self.session.procedures,
+            "globals": self.session.globals,
+        }
+        directory = os.path.dirname(self.state_file)
+        os.makedirs(directory, exist_ok=True)
+        temporary = self.state_file + ".tmp"
+        with open(temporary, "w", encoding="utf-8") as target:
+            json.dump(payload, target, separators=(",", ":"))
+            target.flush()
+            os.fsync(target.fileno())
+        os.replace(temporary, self.state_file)
+
+    @staticmethod
+    def _session_fingerprint(snapshot):
+        return (
+            snapshot.get("id"), snapshot.get("status"), snapshot.get("step_index"),
+            snapshot.get("active_state"), snapshot.get("error"),
+        )
+
+    def _observe(self):
+        if not self.session:
+            return
+        snapshot = self.session.snapshot()
+        fingerprint = self._session_fingerprint(snapshot)
+        if fingerprint != self._fingerprint:
+            self.revision += 1
+            self._fingerprint = fingerprint
+            self._write_state()
+
+    def _control_state(self, client_id, client_kind, is_loopback):
+        now = time.time()
+        if self._browser_lease and self._browser_lease["expires_at"] <= now:
+            self._browser_lease = None
+        kiosk = client_kind == "kiosk" and is_loopback
+        browser = bool(
+            self._browser_lease and self._browser_lease["client_id"] == client_id
+        )
+        return {
+            "can_control": kiosk or browser,
+            "controller": "touchscreen" if kiosk else "browser" if browser else None,
+            "lease_expires_at": self._browser_lease["expires_at"] if browser else None,
+            "pending_request": deepcopy(self._pending_control) if kiosk else None,
+        }
+
+    def snapshot(self, client_id="", client_kind="browser", is_loopback=False):
+        with self._lock:
+            self._observe()
+            control = self._control_state(client_id, client_kind, is_loopback)
+            if self.session:
+                return {**self.session.snapshot(), "revision": self.revision, "control": control}
+            if self.interrupted:
+                old = deepcopy(self.interrupted.get("snapshot", {}))
+                old.update({
+                    "status": "interrupted", "revision": self.revision, "control": control,
+                    "error": "Power or backend restart interrupted this hardware session.",
+                    "screen": {
+                        "title": "Brew interrupted",
+                        "message": "The previous hardware brew did not shut down normally.",
+                        "footer_message": "Use the touchscreen to discard it or restart its current procedure.",
+                        "readouts": old.get("screen", {}).get("readouts", []),
+                        "choices": [], "progress": old.get("screen", {}).get("progress"),
+                        "status": "interrupted", "allowed_controls": ["recover", "discard"],
+                    },
+                })
+                return old
+            return {
+                "id": None, "mode": None, "status": "idle", "revision": self.revision,
+                "speed": 1, "elapsed_s": 0, "workflow": None, "step_index": 0,
+                "step_count": 0, "active_nodes": [], "completed_nodes": [],
+                "active_procedure": None, "active_state": None, "procedures": [],
+                "screen": {"title": "Select a program", "message": "Choose a program to begin.",
+                           "footer_message": "", "readouts": [], "choices": [], "progress": None,
+                           "status": "idle", "allowed_controls": []},
+                "machine": self.avr_bridge.status(), "error": None, "control": control,
+            }
+
+    def request_control(self, client_id, label="Remote browser"):
+        if not client_id:
+            raise RuntimeEngineError("A browser client ID is required")
+        with self._lock:
+            self._pending_control = {
+                "id": uuid.uuid4().hex, "client_id": client_id,
+                "label": str(label)[:80], "requested_at": time.time(),
+            }
+            self.revision += 1
+            return deepcopy(self._pending_control)
+
+    def permit_control(self, request_id, allow, duration_s=900):
+        with self._lock:
+            pending = self._pending_control
+            if not pending or pending["id"] != request_id:
+                raise RuntimeEngineError("That browser control request is no longer pending")
+            if allow:
+                duration_s = max(60, min(3600, int(duration_s)))
+                self._browser_lease = {
+                    "client_id": pending["client_id"], "expires_at": time.time() + duration_s,
+                }
+            self._pending_control = None
+            self.revision += 1
+
+    def authorize(self, client_id, client_kind, is_loopback):
+        if not self._control_state(client_id, client_kind, is_loopback)["can_control"]:
+            raise RuntimeEngineError("Remote browser is view-only; request control on the touchscreen")
+
+    def command(self, client_id, command_id, expected_revision, callback):
+        with self._lock:
+            key = (client_id, command_id)
+            if command_id and key in self._commands:
+                return self._commands[key]
+            self._observe()
+            if expected_revision is not None:
+                try:
+                    matches = int(expected_revision) == self.revision
+                except (TypeError, ValueError):
+                    matches = False
+                if not matches:
+                    raise RuntimeEngineError("Session changed; refresh before sending that command")
+            result = callback()
+            self.revision += 1
+            self._fingerprint = self._session_fingerprint(self.session.snapshot()) if self.session else None
+            self._write_state()
+            if command_id:
+                self._commands[key] = result
+                if len(self._commands) > 128:
+                    self._commands.pop(next(iter(self._commands)))
+            return result
 
     def start(self, workflow, procedures, globals_snapshot, mode="simulation", speed=60):
         with self._lock:
@@ -923,7 +1096,27 @@ class RuntimeManager:
             if hal is None:
                 raise RuntimeEngineError("Runtime mode must be simulation or hardware")
             self.session = WorkflowSession(workflow, procedures, globals_snapshot, hal, speed=speed)
+            self.interrupted = None
+            self._fingerprint = None
             return self.session
+
+    def recover(self, action):
+        with self._lock:
+            if not self.interrupted:
+                raise RuntimeEngineError("No interrupted hardware session exists")
+            saved = self.interrupted
+            if action == "discard":
+                self.interrupted = None
+                self._write_state()
+                return None
+            if action != "restart_current_procedure":
+                raise RuntimeEngineError("Recovery action must be discard or restart_current_procedure")
+            step_index = int(saved.get("snapshot", {}).get("step_index", 0))
+            workflow = deepcopy(saved["workflow"])
+            if step_index:
+                workflow["steps"] = workflow.get("steps", [])[step_index:]
+            self.interrupted = None
+            return self.start(workflow, saved["procedures"], saved["globals"], mode="hardware", speed=1)
 
     def require(self):
         if not self.session:

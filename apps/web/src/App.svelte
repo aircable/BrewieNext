@@ -7,7 +7,8 @@
   import ProcedureStateGraph from './components/ProcedureStateGraph.svelte';
   import ProgramCatalog from './components/ProgramCatalog.svelte';
   import ProgramScreen from './components/ProgramScreen.svelte';
-  import { addWorkflowStep, controlRuntime, createProcedure, loadGraph, loadMachineStatus, loadProcedure, loadPrograms, loadRecipe, loadRecipes, loadRuntimeStatus, navigateRuntime, provideRuntimeInput, removeWorkflowStep, resolveGraph, saveProcedure, saveRecipe, sendMachineCommand, startRuntime, updateWorkflowStep, validateDraft, validateRecipe, type RuntimeStatus } from './lib/api';
+  import ConfirmDialog from './components/ConfirmDialog.svelte';
+  import { addWorkflowStep, controlRuntime, createProcedure, loadGraph, loadMachineStatus, loadProcedure, loadPrograms, loadRecipe, loadRecipes, loadRuntimeStatus, navigateRuntime, permitRuntimeControl, provideRuntimeInput, recoverRuntime, removeWorkflowStep, requestRuntimeControl, resolveGraph, saveProcedure, saveRecipe, sendMachineCommand, startRuntime, updateWorkflowStep, validateDraft, validateRecipe, type RuntimeStatus } from './lib/api';
   import { graph, session, selectedNode, selectedProcedure, editorMode, notice } from './lib/store';
   import { buildSimulationPlan, createIdleMachineStatus, type SimulationPlan } from './lib/simulation';
   import type { GraphNode, ProcedureDocument, ProgramSummary, Recipe, RecipeSummary } from './lib/model';
@@ -31,6 +32,12 @@
   let simulationElapsed = 0;
   let simulationSpeed = 60;
   let simulationRunning = false;
+  let runtimePolling = false;
+  let appliedSessionId: string | null = null;
+  let appliedRevision = -1;
+  let controlRequestSent = false;
+  let handledControlRequest = '';
+  let dialog: { title: string; message: string; confirmLabel: string; danger: boolean; resolve: (value: boolean) => void } | null = null;
   const kioskMode = typeof window !== 'undefined' && window.location.search.indexOf('kiosk=1') !== -1;
   const requestedRuntimeView = typeof window !== 'undefined' && window.location.search.indexOf('view=runtime') !== -1;
 
@@ -53,16 +60,38 @@
     };
     window.addEventListener('beforeunload', warnBeforeUnload);
     const refreshRuntime = async () => {
-      const status = await loadRuntimeStatus();
-      if (status) applyRuntimeSnapshot(status);
-      else {
-        const machine = await loadMachineStatus();
-        if (machine) machineStatus = machine;
-        setIdleRuntimeScreen();
+      if (runtimePolling) return;
+      runtimePolling = true;
+      try {
+        const status = await loadRuntimeStatus();
+        if (status.status === 'idle') {
+          if (appliedSessionId !== null && activeRuntime(runtimeSnapshot)) return;
+          appliedSessionId = null;
+          appliedRevision = status.revision;
+          runtimeSnapshot = status;
+          machineStatus = status.machine;
+          if (kioskMode) editorMode.set('programs');
+          setIdleRuntimeScreen();
+        } else {
+          applyRuntimeSnapshot(status);
+          editorMode.set('runtime');
+          if (status.workflow && status.workflow !== currentGraph.name) {
+            loadGraph(status.workflow).then((loaded) => graph.set(loaded)).catch(() => {});
+          }
+        }
+        const pending = status.control.pending_request;
+        if (kioskMode && pending && pending.id !== handledControlRequest) {
+          handledControlRequest = pending.id;
+          answerRemoteControl(true);
+        }
+      } catch (error) {
+        message = `Runtime connection failed: ${error instanceof Error ? error.message : String(error)}`;
+      } finally {
+        runtimePolling = false;
       }
     };
     refreshRuntime();
-    const runtimeTimer = window.setInterval(refreshRuntime, 300);
+    const runtimeTimer = window.setInterval(refreshRuntime, 500);
     debug('App mounted; loading graph');
     loadGraph()
       .then((value) => {
@@ -100,6 +129,16 @@
       unsubscribe.forEach((stop) => stop());
     };
   });
+
+  function ask(title: string, text: string, confirmLabel = 'CONFIRM', danger = false): Promise<boolean> {
+    return new Promise((resolve) => { dialog = { title, message: text, confirmLabel, danger, resolve }; });
+  }
+
+  function closeDialog(result: boolean) {
+    const active = dialog;
+    dialog = null;
+    active?.resolve(result);
+  }
 
   function allowNavigation() {
     if (!procedureDirty && !nodeDirty && !recipeDirty) return true;
@@ -296,6 +335,9 @@
     return segments;
   }
   function applyRuntimeSnapshot(snapshot: RuntimeStatus) {
+    if (snapshot.id === appliedSessionId && snapshot.revision < appliedRevision) return;
+    appliedSessionId = snapshot.id;
+    appliedRevision = snapshot.revision;
     runtimeSnapshot = snapshot;
     simulationElapsed = snapshot.elapsed_s;
     simulationSpeed = snapshot.speed;
@@ -303,7 +345,7 @@
     machineStatus = snapshot.machine;
     const visibleStatus = snapshot.status === 'aborted' ? 'error' : snapshot.status;
     currentSession = {
-      graph_id: snapshot.workflow,
+      graph_id: snapshot.workflow || currentGraph.name,
       active_node: snapshot.active_nodes[0] || '',
       active_procedure: snapshot.active_procedure || '',
       active_state: snapshot.active_state || '',
@@ -313,8 +355,11 @@
     session.set(currentSession);
   }
 
+  function activeRuntime(snapshot: RuntimeStatus | null) {
+    return Boolean(snapshot && ['running', 'waiting_for_input', 'paused'].includes(snapshot.status));
+  }
+
   function setIdleRuntimeScreen() {
-    if (runtimeSnapshot) return;
     currentSession = {
       graph_id: currentGraph.name,
       active_node: '',
@@ -346,7 +391,7 @@
       const procedures = Object.fromEntries(loaded.filter((entry): entry is readonly [string, ProcedureDocument] => entry[1] !== null));
       simulationPlan = buildSimulationPlan(currentGraph, currentRecipe, procedures);
       const existing = await loadRuntimeStatus();
-      if (existing) {
+      if (existing.status !== 'idle') {
         applyRuntimeSnapshot(existing);
         message = `${existing.mode === 'hardware' ? 'Hardware brew' : 'Simulation'} session restored.`;
       } else {
@@ -361,9 +406,9 @@
   async function startSimulation() {
     if (!currentRecipe) return;
     try {
-      if (runtimeSnapshot && !['complete', 'error', 'aborted'].includes(runtimeSnapshot.status)) {
-        if (runtimeSnapshot.status === 'paused') applyRuntimeSnapshot(await controlRuntime('resume'));
-        else if (runtimeSnapshot.status === 'waiting_for_input') message = 'The runner is waiting for the choice shown on the local screen.';
+      if (activeRuntime(runtimeSnapshot)) {
+        if (runtimeSnapshot?.status === 'paused') applyRuntimeSnapshot(await controlRuntime('resume'));
+        else if (runtimeSnapshot?.status === 'waiting_for_input') message = 'The runner is waiting for the choice shown on the local screen.';
         return;
       }
       applyRuntimeSnapshot(await startRuntime({ mode: 'simulation', recipe_id: currentRecipe.id, workflow: currentGraph.name, speed: simulationSpeed }));
@@ -387,7 +432,7 @@
       return;
     }
     try {
-      if (runtimeSnapshot && !['complete', 'error', 'aborted'].includes(runtimeSnapshot.status)) await controlRuntime('abort');
+      if (activeRuntime(runtimeSnapshot)) await controlRuntime('abort');
       applyRuntimeSnapshot(await startRuntime({ mode: 'simulation', recipe_id: currentRecipe.id, workflow: currentGraph.name, speed: simulationSpeed }));
       message = 'Simulation restarted from the first procedure.';
     } catch (error) {
@@ -395,10 +440,10 @@
     }
   }
   async function startHardwareRuntime() {
-    if (!currentRecipe || !window.confirm('Start a REAL brew? The runner will issue P999, then execute procedure actions on the AVR.')) return;
+    if (!currentRecipe || !await ask('Start real brew?', 'The runner will make the AVR safe with P999, initialize it, and then operate heaters, pumps, and valves.', 'START BREW', true)) return;
     try {
-      if (runtimeSnapshot && !['complete', 'error', 'aborted'].includes(runtimeSnapshot.status)) {
-        if (!window.confirm('An active runner session exists. Abort and replace it?')) return;
+      if (activeRuntime(runtimeSnapshot)) {
+        if (!await ask('Replace active session?', 'The active runner must be aborted and all outputs closed before a new brew can start.', 'ABORT & REPLACE', true)) return;
         await controlRuntime('abort');
       }
       applyRuntimeSnapshot(await startRuntime({ mode: 'hardware', recipe_id: currentRecipe.id, workflow: currentGraph.name, confirm_hardware: true }));
@@ -418,7 +463,13 @@
   }
   async function simulationControl(control: string) {
     try {
-      if (control === 'start') {
+      if (!kioskMode && runtimeSnapshot?.mode === 'hardware' && !runtimeSnapshot.control.can_control) {
+        message = 'This browser is view-only. Request control and approve it on the touchscreen.';
+        return;
+      }
+      if (control === 'recover') await recoverInterrupted('restart_current_procedure');
+      else if (control === 'discard') await recoverInterrupted('discard');
+      else if (control === 'start') {
         if (kioskMode) await startHardwareRuntime();
         else await startSimulation();
       }
@@ -440,7 +491,7 @@
       } else if (control === 'programs') {
         showPrograms();
       } else if (control === 'abort') {
-        if (!window.confirm(`Abort the ${runtimeSnapshot?.mode || 'active'} runner and close all outputs?`)) return;
+        if (!await ask('Abort runner?', `Abort the ${runtimeSnapshot?.mode || 'active'} runner and close all outputs?`, 'ABORT', true)) return;
         applyRuntimeSnapshot(await controlRuntime('abort'));
         message = 'Runner aborted; all modeled outputs were closed.';
       } else if (control === 'close_all') {
@@ -461,6 +512,35 @@
     } catch (error) {
       message = `Runner command failed: ${error instanceof Error ? error.message : String(error)}`;
     }
+  }
+
+  async function askForRemoteControl() {
+    try {
+      await requestRuntimeControl();
+      controlRequestSent = true;
+      message = 'Control requested. Approve this browser on the Brewie touchscreen.';
+    } catch (error) {
+      message = `Control request failed: ${error instanceof Error ? error.message : String(error)}`;
+    }
+  }
+
+  async function answerRemoteControl(allow: boolean) {
+    const pending = runtimeSnapshot?.control.pending_request;
+    if (!pending) return;
+    if (allow) allow = await ask('Allow remote control?', `Give ${pending.label} control of this Brewie for 15 minutes?`, 'ALLOW', true);
+    try {
+      applyRuntimeSnapshot(await permitRuntimeControl(pending.id, allow));
+      message = allow ? 'Remote browser control enabled for 15 minutes.' : 'Remote browser control denied.';
+    } catch (error) {
+      message = `Control approval failed: ${error instanceof Error ? error.message : String(error)}`;
+    }
+  }
+
+  async function recoverInterrupted(action: 'discard' | 'restart_current_procedure') {
+    const restart = action === 'restart_current_procedure';
+    if (!await ask(restart ? 'Restart procedure?' : 'Discard interrupted brew?', restart ? 'The AVR will be made safe, then the interrupted procedure will restart from its beginning.' : 'This clears the saved interrupted session. It cannot be restored afterward.', restart ? 'RESTART' : 'DISCARD', true)) return;
+    try { applyRuntimeSnapshot(await recoverRuntime(action)); }
+    catch (error) { message = `Recovery failed: ${error instanceof Error ? error.message : String(error)}`; }
   }
   function editNodeMetadata(field: 'label' | 'description', value: string) {
     const nodes = currentGraph.nodes.map((node) => node.id === currentNode.id ? { ...node, [field]: value } : node);
@@ -737,6 +817,9 @@
     {:else}
       <BrewieScreen session={currentSession} machine={machineStatus} onControl={simulationControl} />
     {/if}
+    {#if dialog}
+      <ConfirmDialog title={dialog.title} message={dialog.message} confirmLabel={dialog.confirmLabel} danger={dialog.danger} onConfirm={() => closeDialog(true)} onCancel={() => closeDialog(false)} />
+    {/if}
   </main>
 {:else}
 <div class="app-shell">
@@ -767,6 +850,11 @@
   {:else if mode === 'runtime'}
     <main class="runtime-layout">
       <section class="runtime-graph">
+        {#if runtimeSnapshot && !runtimeSnapshot.control.can_control}
+          <div class="control-banner"><span>{controlRequestSent ? 'Waiting for touchscreen approval…' : runtimeSnapshot.mode === 'hardware' ? 'Remote browser is monitoring only.' : 'Hardware control requires touchscreen approval.'}</span><div class="actions"><button class="primary" disabled={controlRequestSent} on:click={askForRemoteControl}>Request control</button></div></div>
+        {:else if runtimeSnapshot?.control.can_control && runtimeSnapshot?.control.controller === 'browser'}
+          <div class="control-banner"><span>Remote machine control permitted for this browser.</span></div>
+        {/if}
         <div class="section-heading runtime-heading">
           <div><div class="eyebrow">LIVE ORCHESTRATION · {runtimeSnapshot?.status.toUpperCase() || 'READY'}</div><h1>{currentGraph.name}</h1></div>
           <div class="simulation-controls">
@@ -795,7 +883,7 @@
       </section>
       <aside class="runtime-sidebar">
         <div class="runtime-popup"><div class="eyebrow">LOCAL BREWIE SCREEN · {currentSession.active_procedure}</div><BrewieScreen session={currentSession} machine={machineStatus} onControl={simulationControl} /></div>
-        <div class="runtime-popup"><div class="eyebrow">BREWMASTER STATUS · {runtimeSnapshot?.mode.toUpperCase() || 'READY'}</div><BrewieScreen session={currentSession} machine={machineStatus} onControl={simulationControl} initialView="machine" /></div>
+        <div class="runtime-popup"><div class="eyebrow">BREWMASTER STATUS · {runtimeSnapshot?.mode?.toUpperCase() || 'READY'}</div><BrewieScreen session={currentSession} machine={machineStatus} onControl={simulationControl} initialView="machine" /></div>
       </aside>
     </main>
   {:else if mode === 'procedure' && currentProcedure}
@@ -821,5 +909,8 @@
   {/if}
 
   <footer><span>Draft / validated before save</span><span>Safety-critical execution remains on the engine</span></footer>
+  {#if dialog}
+    <ConfirmDialog title={dialog.title} message={dialog.message} confirmLabel={dialog.confirmLabel} danger={dialog.danger} onConfirm={() => closeDialog(true)} onCancel={() => closeDialog(false)} />
+  {/if}
 </div>
 {/if}

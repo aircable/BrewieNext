@@ -9,6 +9,7 @@
   let activeControl = '';
   let screenView: 'procedure' | 'machine' = initialView || (typeof window !== 'undefined' && window.location.search.indexOf('machine=1') !== -1 ? 'machine' : 'procedure');
   let touchMarker = { visible: false, x: 0, y: 0 };
+  $: recovering = session.screen.allowed_controls?.includes('recover');
   $: primaryControl = session.status === 'idle' ? 'start' : session.status === 'complete' || session.status === 'error' ? 'reset' : 'pause';
   $: primaryLabel = session.status === 'paused' ? 'RESUME' : primaryControl.toUpperCase();
 
@@ -102,10 +103,17 @@
             <button data-touch-control="next_procedure" class:pressed={activeControl === 'next_procedure'} on:click={() => control('next_procedure')}>NEXT<br>PROCEDURE</button>
           </div>
         {/if}
-        <div class="screen-controls">
-          <button data-touch-control={primaryControl} class:pressed={activeControl === primaryControl} on:click={() => control(primaryControl)}>{primaryLabel}</button>
-          <button data-touch-control="abort" class:pressed={activeControl === 'abort'} class="danger" on:click={() => control('abort')}>ABORT</button>
-        </div>
+        {#if recovering}
+          <div class="screen-controls">
+            <button data-touch-control="recover" on:click={() => control('recover')}>RESTART<br>PROCEDURE</button>
+            <button data-touch-control="discard" class="danger" on:click={() => control('discard')}>DISCARD</button>
+          </div>
+        {:else}
+          <div class="screen-controls">
+            <button data-touch-control={primaryControl} class:pressed={activeControl === primaryControl} on:click={() => control(primaryControl)}>{primaryLabel}</button>
+            <button data-touch-control="abort" class:pressed={activeControl === 'abort'} class="danger" on:click={() => control('abort')}>ABORT</button>
+          </div>
+        {/if}
       </div>
     {:else}
       <MachineStatusPanel {machine} onCommand={onControl} onBack={() => screenView = 'procedure'} />
