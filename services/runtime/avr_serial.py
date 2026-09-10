@@ -191,26 +191,27 @@ class AvrSerialBridge:
                 self._last_error = "AVR safe start failed: %s" % error
                 self._stop.wait(1.0)
 
-    def _perform_safe_start(self):
+    def _perform_safe_start(self, confirm_initialization_status=False):
         self.close_all()
         if self.enabled:
             self._wait_for_next_status(
                 "AVR close-all completion status was not received", timeout=15.0
             )
+        with self._state_lock:
+            self._safe_start_complete = True
         if self.calibration:
-            with self._state_lock:
-                pre_initialization_sequence = self._status_sequence
+            if confirm_initialization_status:
+                with self._state_lock:
+                    pre_initialization_sequence = self._status_sequence
             self.initialize()
-            if self.enabled:
+            if self.enabled and confirm_initialization_status:
                 self._wait_for_next_status(
                     "AVR status was not received after calibration",
                     after_sequence=pre_initialization_sequence,
-                    timeout=5.0,
+                    timeout=15.0,
                 )
         else:
             self._last_error = "AVR is safe but not initialized: machine calibration file is missing"
-        with self._state_lock:
-            self._safe_start_complete = True
 
     def _wait_for_next_status(self, error_message, after_sequence=None, timeout=5.0):
         with self._status_condition:
@@ -232,7 +233,10 @@ class AvrSerialBridge:
             with self._state_lock:
                 self._safe_start_complete = False
                 self._initialization_complete = False
-            self._perform_safe_start()
+            # A workflow start is an explicit request, so a missing post-P80
+            # status fails that request once. The background startup loop does
+            # not retry P999/P80 merely because the first powered status is slow.
+            self._perform_safe_start(confirm_initialization_status=True)
 
     def initialize(self):
         """Load calibration and power on the AVR using its P80 protocol."""
