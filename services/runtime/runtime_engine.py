@@ -286,6 +286,10 @@ class AvrHAL:
         self.cancel_operations()
         return self._call(self.bridge.close_all)
 
+    def prepare_session(self):
+        self.cancel_operations()
+        return self._call(self.bridge.prepare_hardware_session)
+
     def reset_level(self):
         return self._call(self.bridge.reset_level)
 
@@ -671,10 +675,12 @@ class WorkflowSession:
         self._lock = threading.RLock()
         self._stop = threading.Event()
         self._thread = None
-        if self.mode == "hardware" and not self.hal.connected():
-            raise RuntimeEngineError("AVR hardware is not connected")
         if self.mode == "hardware":
-            self.hal.close_all()
+            if not self.hal.connected():
+                raise RuntimeEngineError("AVR hardware is not connected")
+            self.hal.prepare_session()
+            if not self.hal.connected():
+                raise RuntimeEngineError("AVR hardware preparation did not complete")
         self._start_step()
         self.tick(0)
         if autostart:

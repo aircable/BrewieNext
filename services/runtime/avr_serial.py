@@ -122,6 +122,7 @@ class AvrSerialBridge:
         self._fd = None
         self._packet_id = 0
         self._transport_lock = threading.Lock()
+        self._session_prepare_lock = threading.Lock()
         self._state_lock = threading.Lock()
         self._status_condition = threading.Condition(self._state_lock)
         self._status_sequence = 0
@@ -193,20 +194,45 @@ class AvrSerialBridge:
     def _perform_safe_start(self):
         self.close_all()
         if self.enabled:
-            with self._status_condition:
-                acknowledged_sequence = self._status_sequence
-                completed = self._status_condition.wait_for(
-                    lambda: self._status_sequence > acknowledged_sequence,
-                    timeout=15.0,
-                )
-            if not completed:
-                raise AvrSerialError("AVR close-all completion status was not received")
+            self._wait_for_next_status(
+                "AVR close-all completion status was not received", timeout=15.0
+            )
         if self.calibration:
+            with self._state_lock:
+                pre_initialization_sequence = self._status_sequence
             self.initialize()
+            if self.enabled:
+                self._wait_for_next_status(
+                    "AVR status was not received after calibration",
+                    after_sequence=pre_initialization_sequence,
+                    timeout=5.0,
+                )
         else:
             self._last_error = "AVR is safe but not initialized: machine calibration file is missing"
         with self._state_lock:
             self._safe_start_complete = True
+
+    def _wait_for_next_status(self, error_message, after_sequence=None, timeout=5.0):
+        with self._status_condition:
+            sequence = self._status_sequence if after_sequence is None else after_sequence
+            completed = self._status_condition.wait_for(
+                lambda: self._status_sequence > sequence,
+                timeout=timeout,
+            )
+        if not completed:
+            raise AvrSerialError(error_message)
+
+    def prepare_hardware_session(self):
+        """Establish a safe, calibrated baseline before a hardware workflow."""
+        if not self.calibration:
+            raise AvrSerialError("Hardware workflow requires a machine calibration file")
+        if self.enabled and self._fd is None:
+            raise AvrSerialError("AVR serial transport is not connected")
+        with self._session_prepare_lock:
+            with self._state_lock:
+                self._safe_start_complete = False
+                self._initialization_complete = False
+            self._perform_safe_start()
 
     def initialize(self):
         """Load calibration and power on the AVR using its P80 protocol."""

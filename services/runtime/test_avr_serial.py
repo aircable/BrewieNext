@@ -110,6 +110,19 @@ class AvrSerialProtocolTests(unittest.TestCase):
         )
         self.assertTrue(bridge.status()["initializationComplete"])
 
+    def test_hardware_session_preparation_reapplies_safe_reset_and_calibration(self):
+        bridge = RecordingBridge()
+        bridge.calibration = self.calibration
+        bridge._safe_start_complete = True
+        bridge._initialization_complete = True
+        bridge.prepare_hardware_session()
+        self.assertEqual(
+            bridge.payloads,
+            ["P999", "P80 18996.080294 0.000000 0.81854 1.70194 100.00"],
+        )
+        self.assertTrue(bridge.status()["safeStartComplete"])
+        self.assertTrue(bridge.status()["initializationComplete"])
+
     def test_safe_start_round_trip_over_tty(self):
         master_fd, slave_fd = pty.openpty()
         device = os.ttyname(slave_fd)

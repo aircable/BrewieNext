@@ -185,6 +185,9 @@ class RuntimeProcedureTests(unittest.TestCase):
             def close_all(self):
                 self.calls.append(("close_all",))
 
+            def prepare_hardware_session(self):
+                self.calls.append(("prepare_hardware_session",))
+
             def set_device(self, device, action):
                 self.calls.append(("set_device", device, action))
 
@@ -217,7 +220,7 @@ class RuntimeProcedureTests(unittest.TestCase):
         self.assertEqual(
             bridge.calls,
             [
-                ("close_all",),
+                ("prepare_hardware_session",),
                 ("set_device", "boil_return_valve", "open"),
                 ("set_device", "boil_return_valve", "closed"),
                 ("close_all",),
