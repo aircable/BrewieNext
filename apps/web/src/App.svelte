@@ -37,6 +37,8 @@
   let appliedRevision = -1;
   let controlRequestSent = false;
   let handledControlRequest = '';
+  let kioskIdleRouteInitialized = false;
+  let selectedProgramId = '';
   let dialog: { title: string; message: string; confirmLabel: string; danger: boolean; resolve: (value: boolean) => void } | null = null;
   const kioskMode = typeof window !== 'undefined' && window.location.search.indexOf('kiosk=1') !== -1;
   const requestedRuntimeView = typeof window !== 'undefined' && window.location.search.indexOf('view=runtime') !== -1;
@@ -70,7 +72,10 @@
           appliedRevision = status.revision;
           runtimeSnapshot = status;
           machineStatus = status.machine;
-          if (kioskMode) editorMode.set('programs');
+          if (kioskMode && !kioskIdleRouteInitialized) {
+            kioskIdleRouteInitialized = true;
+            editorMode.set('runtime');
+          }
           setIdleRuntimeScreen();
         } else {
           applyRuntimeSnapshot(status);
@@ -199,9 +204,11 @@
       selectedState = '';
       nodeDirty = false;
       simulationPlan = null;
-      editorMode.set('overview');
+      selectedProgramId = program.id;
+      editorMode.set(kioskMode ? 'runtime' : 'overview');
+      setIdleRuntimeScreen();
       message = program.status === 'available'
-        ? `Opened ${program.label}.`
+        ? kioskMode ? `${program.label} selected. Press START when the machine is ready.` : `Opened ${program.label}.`
         : `Opened ${program.label} draft. Add its first procedure to begin designing it.`;
     } catch (error) {
       message = `Program load failed: ${error instanceof Error ? error.message : 'unknown error'}`;
@@ -360,6 +367,7 @@
   }
 
   function setIdleRuntimeScreen() {
+    const selectedProgram = programs.find((program) => program.id === selectedProgramId);
     currentSession = {
       graph_id: currentGraph.name,
       active_node: '',
@@ -367,8 +375,12 @@
       active_state: '',
       status: 'idle',
       screen: {
-        title: 'BrewieNext ready',
-        message: kioskMode ? 'Start a brew from the browser or press START for hardware mode.' : 'Select a recipe and start simulation or hardware mode.',
+        title: selectedProgram ? `${selectedProgram.label} ready` : 'BrewieNext ready',
+        message: kioskMode
+          ? selectedProgram
+            ? `${selectedProgram.label} is selected. Press START to begin hardware mode.`
+            : 'Choose Programs to select a machine workflow, or use Machine status.'
+          : 'Select a recipe and start simulation or hardware mode.',
         footer_message: '',
         status: 'idle',
         readouts: [],
