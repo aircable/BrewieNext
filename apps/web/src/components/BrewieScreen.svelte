@@ -10,7 +10,8 @@
   let screenView: 'procedure' | 'machine' = initialView || (typeof window !== 'undefined' && window.location.search.indexOf('machine=1') !== -1 ? 'machine' : 'procedure');
   let touchMarker = { visible: false, x: 0, y: 0 };
   $: recovering = session.screen.allowed_controls?.includes('recover');
-  $: primaryControl = session.status === 'idle' ? 'start' : session.status === 'complete' || session.status === 'error' ? 'reset' : 'pause';
+  $: terminal = ['complete', 'error', 'aborted'].includes(session.status);
+  $: primaryControl = session.status === 'idle' ? 'start' : terminal ? 'restart' : 'pause';
   $: primaryLabel = session.status === 'paused' ? 'RESUME' : primaryControl.toUpperCase();
 
   function activate(control: string) {
@@ -93,7 +94,7 @@
         </div>
       {/if}
       <div class="procedure-button-block">
-        {#if session.status === 'idle'}
+        {#if session.status === 'idle' || terminal}
           <div class="procedure-navigation single">
             <button data-touch-control="programs" class:pressed={activeControl === 'programs'} on:click={() => control('programs')}>← PROGRAMS</button>
           </div>
@@ -103,15 +104,21 @@
             <button data-touch-control="next_procedure" class:pressed={activeControl === 'next_procedure'} on:click={() => control('next_procedure')}>NEXT<br>PROCEDURE</button>
           </div>
         {/if}
-        {#if recovering}
+        {#if terminal}
+          <div class="screen-controls single">
+            <button data-touch-control="restart" class:pressed={activeControl === 'restart'} on:click={() => control('restart')}>RESTART THIS PROGRAM</button>
+          </div>
+        {:else if recovering}
           <div class="screen-controls">
             <button data-touch-control="recover" on:click={() => control('recover')}>RESTART<br>PROCEDURE</button>
             <button data-touch-control="discard" class="danger" on:click={() => control('discard')}>DISCARD</button>
           </div>
         {:else}
-          <div class="screen-controls">
+          <div class="screen-controls" class:single={session.status === 'idle'}>
             <button data-touch-control={primaryControl} class:pressed={activeControl === primaryControl} on:click={() => control(primaryControl)}>{primaryLabel}</button>
-            <button data-touch-control="abort" class:pressed={activeControl === 'abort'} class="danger" on:click={() => control('abort')}>ABORT</button>
+            {#if session.status !== 'idle'}
+              <button data-touch-control="abort" class:pressed={activeControl === 'abort'} class="danger" on:click={() => control('abort')}>ABORT</button>
+            {/if}
           </div>
         {/if}
       </div>

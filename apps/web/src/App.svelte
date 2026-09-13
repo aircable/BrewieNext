@@ -39,6 +39,7 @@
   let handledControlRequest = '';
   let kioskIdleRouteInitialized = false;
   let selectedProgramId = '';
+  let dismissedTerminalSessionId: string | null = null;
   let dialog: { title: string; message: string; confirmLabel: string; danger: boolean; resolve: (value: boolean) => void } | null = null;
   const kioskMode = typeof window !== 'undefined' && window.location.search.indexOf('kiosk=1') !== -1;
   const requestedRuntimeView = typeof window !== 'undefined' && window.location.search.indexOf('view=runtime') !== -1;
@@ -77,6 +78,9 @@
             editorMode.set('runtime');
           }
           setIdleRuntimeScreen();
+        } else if (terminalRuntime(status) && status.id === dismissedTerminalSessionId) {
+          runtimeSnapshot = status;
+          machineStatus = status.machine;
         } else {
           applyRuntimeSnapshot(status);
           editorMode.set('runtime');
@@ -174,7 +178,11 @@
     editorMode.set('runtime');
     if (!simulationPlan) await prepareSimulation();
   }
-  function showPrograms() { if (mode === 'programs' || allowNavigation()) editorMode.set('programs'); }
+  function showPrograms() {
+    if (mode !== 'programs' && !allowNavigation()) return;
+    if (terminalRuntime(runtimeSnapshot)) dismissedTerminalSessionId = runtimeSnapshot?.id || null;
+    editorMode.set('programs');
+  }
   function showOverview() { if (mode === 'overview' || allowNavigation()) editorMode.set('overview'); }
   function showRecipes() { if (mode === 'recipes' || allowNavigation()) editorMode.set('recipes'); }
   async function openProgram(program: ProgramSummary) {
@@ -350,20 +358,23 @@
     simulationSpeed = snapshot.speed;
     simulationRunning = snapshot.status === 'running';
     machineStatus = snapshot.machine;
-    const visibleStatus = snapshot.status === 'aborted' ? 'error' : snapshot.status;
     currentSession = {
       graph_id: snapshot.workflow || currentGraph.name,
       active_node: snapshot.active_nodes[0] || '',
       active_procedure: snapshot.active_procedure || '',
       active_state: snapshot.active_state || '',
-      status: visibleStatus,
-      screen: { ...snapshot.screen, status: visibleStatus }
+      status: snapshot.status,
+      screen: { ...snapshot.screen, status: snapshot.status }
     };
     session.set(currentSession);
   }
 
   function activeRuntime(snapshot: RuntimeStatus | null) {
     return Boolean(snapshot && ['running', 'waiting_for_input', 'paused'].includes(snapshot.status));
+  }
+
+  function terminalRuntime(snapshot: RuntimeStatus | null) {
+    return Boolean(snapshot && ['complete', 'error', 'aborted'].includes(snapshot.status));
   }
 
   function setIdleRuntimeScreen() {
@@ -493,7 +504,7 @@
       } else if (control === 'pause') {
         if (runtimeSnapshot?.status === 'paused') await startSimulation();
         else await pauseSimulation();
-      } else if (control === 'reset') {
+      } else if (control === 'reset' || control === 'restart') {
         if (kioskMode || runtimeSnapshot?.mode === 'hardware') await startHardwareRuntime();
         else await resetSimulation();
       }

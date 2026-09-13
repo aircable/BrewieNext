@@ -89,10 +89,18 @@
   </div>
 
   <div class="tank-status" aria-label="Boil and mash tank readings">
-    <strong>{fmt(machine.sensors.boilVolumeL)}L</strong><span>LEVEL</span><strong>{fmt(machine.sensors.mashVolumeL)}L</strong>
-    <strong>{fmt(machine.sensors.tempBoilC)}C</strong><span>TEMP</span><strong>{fmt(machine.sensors.tempMashC)}C</strong>
-    <strong>{boilTarget === null ? '–' : `${fmt(boilTarget)}C`}</strong><span>TARGET</span><strong>{mashTarget === null ? '–' : `${fmt(mashTarget)}C`}</strong>
-    <strong>{machine.pumps.boil_pump ? 'ON' : 'OFF'}</strong><span>PUMP</span><strong>{machine.pumps.mash_pump ? 'ON' : 'OFF'}</strong>
+    <div class="tank-status-row">
+      <strong>{fmt(machine.sensors.boilVolumeL)}L</strong><span>LEVEL</span><strong>{fmt(machine.sensors.mashVolumeL)}L</strong>
+    </div>
+    <div class="tank-status-row">
+      <strong>{fmt(machine.sensors.tempBoilC)}C</strong><span>TEMP</span><strong>{fmt(machine.sensors.tempMashC)}C</strong>
+    </div>
+    <div class="tank-status-row">
+      <strong>{boilTarget === null ? '–' : `${fmt(boilTarget)}C`}</strong><span>TARGET</span><strong>{mashTarget === null ? '–' : `${fmt(mashTarget)}C`}</strong>
+    </div>
+    <div class="tank-status-row">
+      <strong>{machine.pumps.boil_pump ? 'ON' : 'OFF'}</strong><span>PUMP</span><strong>{machine.pumps.mash_pump ? 'ON' : 'OFF'}</strong>
+    </div>
   </div>
 </section>
 {/if}

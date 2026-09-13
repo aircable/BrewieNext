@@ -399,7 +399,11 @@ class ProcedureExecution:
 
     def waiting_for_input(self):
         definition = self._input_definition()
-        return bool(definition and definition["key"] not in self.inputs)
+        return bool(
+            self.status == "running"
+            and definition
+            and definition["key"] not in self.inputs
+        )
 
     def provide_input(self, key, value):
         definition = self._input_definition()
@@ -587,6 +591,7 @@ class ProcedureExecution:
             except RuntimeEngineError:
                 pass
         self.status = "aborted"
+        self.log.append("Aborted by user")
 
     def fail(self, message):
         self.error = message
@@ -602,7 +607,7 @@ class ProcedureExecution:
         notify = notify if isinstance(notify, dict) else {}
         input_definition = self._input_definition()
         choices = []
-        if input_definition and input_definition["key"] not in self.inputs:
+        if self.waiting_for_input():
             choices = [
                 {"value": value, "label": value.replace("_", " ").upper()}
                 for value in input_definition["options"]
@@ -890,6 +895,13 @@ class WorkflowSession:
                     "title": "Brew stopped",
                     "message": self.error or (primary or {}).get("error") or "The procedure failed.",
                     "footer_message": "All outputs were closed. Review the error before continuing.",
+                    "choices": [],
+                })
+            elif self.status == "aborted":
+                screen.update({
+                    "title": "Brew aborted",
+                    "message": "The brew was stopped by the user.",
+                    "footer_message": "All outputs were closed safely.",
                     "choices": [],
                 })
             return {

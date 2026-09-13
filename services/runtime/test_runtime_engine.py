@@ -343,7 +343,12 @@ class RuntimeApiTests(unittest.TestCase):
                 "/api/runtime/session/control",
                 json={"action": "abort"},
             )
-            self.assertEqual(response.get_json()["data"]["status"], "aborted")
+            aborted = response.get_json()["data"]
+            self.assertEqual(aborted["status"], "aborted")
+            self.assertEqual(aborted["screen"]["title"], "Brew aborted")
+            self.assertEqual(aborted["screen"]["choices"], [])
+            self.assertEqual(aborted["procedures"][0]["status"], "aborted")
+            self.assertIsNone(aborted["procedures"][0]["input"])
 
     def test_runtime_mutations_reject_cross_host_origin(self):
         manager = RuntimeManager(None)
