@@ -8,6 +8,7 @@
   import ProgramCatalog from './components/ProgramCatalog.svelte';
   import ProgramScreen from './components/ProgramScreen.svelte';
   import ConfirmDialog from './components/ConfirmDialog.svelte';
+  import BusyOverlay from './components/BusyOverlay.svelte';
   import { addWorkflowStep, controlRuntime, createProcedure, loadGraph, loadMachineStatus, loadProcedure, loadPrograms, loadRecipe, loadRecipes, loadRuntimeStatus, navigateRuntime, permitRuntimeControl, provideRuntimeInput, recoverRuntime, removeWorkflowStep, requestRuntimeControl, resolveGraph, saveProcedure, saveRecipe, sendMachineCommand, startRuntime, updateWorkflowStep, validateDraft, validateRecipe, type RuntimeStatus } from './lib/api';
   import { graph, session, selectedNode, selectedProcedure, editorMode, notice } from './lib/store';
   import { buildSimulationPlan, createIdleMachineStatus, type SimulationPlan } from './lib/simulation';
@@ -40,6 +41,7 @@
   let kioskIdleRouteInitialized = false;
   let selectedProgramId = '';
   let dismissedTerminalSessionId: string | null = null;
+  let busyMessage = '';
   let dialog: { title: string; message: string; confirmLabel: string; danger: boolean; resolve: (value: boolean) => void } | null = null;
   const kioskMode = typeof window !== 'undefined' && window.location.search.indexOf('kiosk=1') !== -1;
   const requestedRuntimeView = typeof window !== 'undefined' && window.location.search.indexOf('view=runtime') !== -1;
@@ -463,16 +465,20 @@
     }
   }
   async function startHardwareRuntime() {
-    if (!currentRecipe || !await ask('Start real brew?', 'The runner will make the AVR safe with P999, initialize it, and then operate heaters, pumps, and valves.', 'START BREW', true)) return;
+    if (busyMessage || !currentRecipe || !await ask('Start real brew?', 'The runner will make the AVR safe with P999, initialize it, and then operate heaters, pumps, and valves.', 'START BREW', true)) return;
+    if (activeRuntime(runtimeSnapshot) && !await ask('Replace active session?', 'The active runner must be aborted and all outputs closed before a new brew can start.', 'ABORT & REPLACE', true)) return;
+    busyMessage = 'STARTING BREW…';
+    message = 'Making the machine safe and initializing the AVR…';
     try {
       if (activeRuntime(runtimeSnapshot)) {
-        if (!await ask('Replace active session?', 'The active runner must be aborted and all outputs closed before a new brew can start.', 'ABORT & REPLACE', true)) return;
         await controlRuntime('abort');
       }
       applyRuntimeSnapshot(await startRuntime({ mode: 'hardware', recipe_id: currentRecipe.id, workflow: currentGraph.name, confirm_hardware: true }));
       message = 'Hardware runner started at 1×; AVR commands are live.';
     } catch (error) {
       message = `Hardware start failed: ${error instanceof Error ? error.message : String(error)}`;
+    } finally {
+      busyMessage = '';
     }
   }
   async function setRuntimeSpeed() {
@@ -485,6 +491,7 @@
     }
   }
   async function simulationControl(control: string) {
+    if (busyMessage) return;
     try {
       if (!kioskMode && runtimeSnapshot?.mode === 'hardware' && !runtimeSnapshot.control.can_control) {
         message = 'This browser is view-only. Request control and approve it on the touchscreen.';
@@ -843,6 +850,9 @@
     {#if dialog}
       <ConfirmDialog title={dialog.title} message={dialog.message} confirmLabel={dialog.confirmLabel} danger={dialog.danger} onConfirm={() => closeDialog(true)} onCancel={() => closeDialog(false)} />
     {/if}
+    {#if busyMessage}
+      <BusyOverlay message={busyMessage} detail="Making the machine safe and initializing the AVR. Please wait." />
+    {/if}
   </main>
 {:else}
 <div class="app-shell">
@@ -934,6 +944,9 @@
   <footer><span>Draft / validated before save</span><span>Safety-critical execution remains on the engine</span></footer>
   {#if dialog}
     <ConfirmDialog title={dialog.title} message={dialog.message} confirmLabel={dialog.confirmLabel} danger={dialog.danger} onConfirm={() => closeDialog(true)} onCancel={() => closeDialog(false)} />
+  {/if}
+  {#if busyMessage}
+    <BusyOverlay message={busyMessage} detail="Making the machine safe and initializing the AVR. Please wait." />
   {/if}
 </div>
 {/if}
