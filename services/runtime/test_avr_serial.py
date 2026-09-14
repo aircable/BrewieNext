@@ -77,6 +77,13 @@ class AvrSerialProtocolTests(unittest.TestCase):
         self.assertEqual(status["heaters"]["boil_heater"]["state"], "deferred")
         self.assertEqual(status["heaters"]["boil_heater"]["targetC"], 67)
 
+    def test_valve_state_words_are_normalized_to_avr_commands(self):
+        bridge = RecordingBridge()
+        bridge.set_device("water_inlet_valve", "opened")
+        bridge.set_device("water_inlet_valve", "closed")
+        self.assertEqual(bridge.payloads, ["P110", "P111"])
+        self.assertFalse(bridge.status()["valves"]["water_inlet_valve"])
+
     def test_close_all_uses_p999_and_clears_outputs(self):
         bridge = RecordingBridge()
         bridge.set_device("mash_pump", "on")

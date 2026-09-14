@@ -394,6 +394,13 @@ class AvrSerialBridge:
                     self._acks.pop(packet_id, None)
 
     def set_device(self, device_id, action="toggle"):
+        # Procedure YAML describes valve states (open/closed), while the AVR
+        # registry describes commands (open/close). Accept both vocabularies
+        # at the hardware boundary so simulation and hardware behave alike.
+        if action == "closed":
+            action = "close"
+        elif action == "opened":
+            action = "open"
         try:
             device = self.registry.resolve(device_id)
         except HardwareRegistryError as error:
