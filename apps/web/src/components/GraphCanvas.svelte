@@ -7,6 +7,7 @@
   export let activeNode = '';
   export let activeNodes: string[] = activeNode ? [activeNode] : [];
   export let completedNodes: string[] = [];
+  export let skippedNodes: string[] = [];
   export let onSelect: (id: string) => void;
 
   let flowNodes: any[] = [];
@@ -19,7 +20,7 @@
     position: node.position,
     data: { label: node.label, procedure: node.procedure },
     type: 'default',
-    class: [activeNodes.includes(node.id) || node.id === activeNode ? 'active-node' : '', completedNodes.includes(node.id) ? 'completed-node' : '', node.parallel_group ? 'parallel-node' : ''].filter(Boolean).join(' ')
+    class: [activeNodes.includes(node.id) || node.id === activeNode ? 'active-node' : '', completedNodes.includes(node.id) ? 'completed-node' : '', skippedNodes.includes(node.id) ? 'skipped-node' : '', node.parallel_group ? 'parallel-node' : ''].filter(Boolean).join(' ')
   }));
 
   $: graphHeight = Math.max(620, ...graph.nodes.map((node) => node.position.y + 150));
@@ -40,7 +41,7 @@
   {#if legacyRenderer}
     <div class="legacy-graph" aria-label="Brewing procedure nodes">
       {#each flowNodes as node}
-        <button class:legacy-active={activeNodes.includes(node.id) || node.id === activeNode} class:legacy-complete={completedNodes.includes(node.id)} on:click={() => onSelect(node.id)}>
+        <button class:legacy-active={activeNodes.includes(node.id) || node.id === activeNode} class:legacy-complete={completedNodes.includes(node.id)} class:legacy-skipped={skippedNodes.includes(node.id)} on:click={() => onSelect(node.id)}>
           <strong>{node.data.label}</strong>
           <small>{node.data.procedure}</small>
         </button>

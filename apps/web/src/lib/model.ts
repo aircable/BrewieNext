@@ -67,6 +67,18 @@ export type BrewieScreen = {
   choices: { value: string; label: string }[];
   progress: number | null;
   allowed_controls: string[];
+  failure?: {
+    kind: string;
+    procedure?: string;
+    state?: string;
+    state_description?: string;
+    message: string;
+    timeout_s?: number | null;
+    elapsed_s?: number;
+    criteria: { expression: string; observed: { name: string; value: string | number | boolean }[] }[];
+    safe_shutdown_confirmed?: boolean;
+    safe_shutdown_error?: string;
+  } | null;
 };
 
 export type BrewSession = {

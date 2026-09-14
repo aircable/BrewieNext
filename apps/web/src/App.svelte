@@ -511,6 +511,22 @@
       } else if (control === 'pause') {
         if (runtimeSnapshot?.status === 'paused') await startSimulation();
         else await pauseSimulation();
+      } else if (control === 'retry' || control === 'skip') {
+        if (control === 'skip' && !await ask(
+          'Skip failed procedure?',
+          'This advances to the next workflow step without completing the current one. All outputs remain off until the next step starts.',
+          'SKIP PROCEDURE',
+          true
+        )) return;
+        busyMessage = control === 'retry' ? 'RETRYING PROCEDURE…' : 'SKIPPING PROCEDURE…';
+        try {
+          applyRuntimeSnapshot(await controlRuntime(control));
+          message = control === 'retry'
+            ? 'Failed state restarted from its safe entry point.'
+            : 'Failed workflow step skipped by the operator.';
+        } finally {
+          busyMessage = '';
+        }
       } else if (control === 'reset' || control === 'restart') {
         if (kioskMode || runtimeSnapshot?.mode === 'hardware') await startHardwareRuntime();
         else await resetSimulation();
@@ -851,7 +867,7 @@
       <ConfirmDialog title={dialog.title} message={dialog.message} confirmLabel={dialog.confirmLabel} danger={dialog.danger} onConfirm={() => closeDialog(true)} onCancel={() => closeDialog(false)} />
     {/if}
     {#if busyMessage}
-      <BusyOverlay message={busyMessage} detail="Making the machine safe and initializing the AVR. Please wait." />
+      <BusyOverlay message={busyMessage} detail={busyMessage === 'STARTING BREW…' ? 'Making the machine safe and initializing the AVR. Please wait.' : 'Confirming safe outputs before changing workflow state.'} />
     {/if}
   </main>
 {:else}
@@ -912,7 +928,7 @@
             {/each}
           </div>
         </div>
-        <GraphCanvas graph={currentGraph} activeNode={currentSession.active_node} activeNodes={runtimeSnapshot?.active_nodes || [currentSession.active_node]} completedNodes={runtimeSnapshot?.completed_nodes || []} onSelect={selectNode} />
+        <GraphCanvas graph={currentGraph} activeNode={currentSession.active_node} activeNodes={runtimeSnapshot?.active_nodes || [currentSession.active_node]} completedNodes={runtimeSnapshot?.completed_nodes || []} skippedNodes={runtimeSnapshot?.skipped_nodes || []} onSelect={selectNode} />
       </section>
       <aside class="runtime-sidebar">
         <div class="runtime-popup"><div class="eyebrow">LOCAL BREWIE SCREEN · {currentSession.active_procedure}</div><BrewieScreen session={currentSession} machine={machineStatus} onControl={simulationControl} /></div>

@@ -2175,8 +2175,10 @@ def api_control_runtime_session():
             if action == "pause": session.pause()
             elif action == "resume": session.resume()
             elif action == "abort": session.abort()
+            elif action == "retry": session.retry()
+            elif action == "skip": session.skip()
             elif action == "set_speed": session.set_speed(body.get("speed"))
-            else: raise RuntimeEngineError("Action must be pause, resume, abort, or set_speed")
+            else: raise RuntimeEngineError("Action must be pause, resume, retry, skip, abort, or set_speed")
         return jsonify({"data": _runtime_command(body, perform)})
     except RuntimeEngineError as error:
         return jsonify({"error": str(error)}), 409

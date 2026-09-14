@@ -23,6 +23,83 @@ def load_yaml(name):
 
 
 class RuntimeProcedureTests(unittest.TestCase):
+    @staticmethod
+    def recoverable_timeout_session():
+        failed = {
+            "name": "pump_check",
+            "start_state": "start_pump",
+            "states": {
+                "start_pump": {
+                    "description": "Establish mash circulation",
+                    "action": [{"set_pump": {"device": "mash_pump", "state": "on"}}],
+                    "timeout_s": "1s",
+                    "transition": [
+                        {"mash_pump_tacho > 500": "next_phase"},
+                        {"timeout_exceeded": "error_handler"},
+                        {"default": "loops"},
+                    ],
+                }
+            },
+            "error_handler": "pump-check-error",
+        }
+        following = {
+            "name": "following",
+            "start_state": "wait",
+            "states": {"wait": {"action": [], "transition": [{"default": "loops"}]}},
+        }
+        workflow = {"name": "test", "steps": [
+            {"id": "pump", "procedure": "pump_check"},
+            {"id": "following", "procedure": "following"},
+        ]}
+        session = WorkflowSession(
+            workflow, {"pump_check": failed, "following": following}, {},
+            SimulatedHAL(), autostart=False,
+        )
+        session.tick(1)
+        return session
+
+    def test_timeout_reports_failed_criterion_and_observed_value(self):
+        session = self.recoverable_timeout_session()
+        snapshot = session.snapshot()
+        self.assertEqual(snapshot["status"], "error")
+        self.assertEqual(snapshot["screen"]["allowed_controls"], ["retry", "skip", "abort"])
+        failure = snapshot["screen"]["failure"]
+        self.assertEqual(failure["kind"], "timeout")
+        self.assertEqual(failure["state_description"], "Establish mash circulation")
+        self.assertEqual(failure["criteria"][0]["expression"], "mash_pump_tacho > 500")
+        self.assertEqual(
+            failure["criteria"][0]["observed"],
+            [{"name": "mash_pump_tacho", "value": 220}],
+        )
+        self.assertTrue(failure["safe_shutdown_confirmed"])
+
+    def test_retry_reenters_failed_state_after_safe_shutdown(self):
+        session = self.recoverable_timeout_session()
+        session.retry()
+        snapshot = session.snapshot()
+        self.assertEqual(snapshot["status"], "running")
+        self.assertEqual(snapshot["active_state"], "start_pump")
+        self.assertTrue(snapshot["machine"]["pumps"]["mash_pump"])
+
+    def test_skip_advances_without_marking_failed_node_complete(self):
+        session = self.recoverable_timeout_session()
+        session.skip()
+        snapshot = session.snapshot()
+        self.assertEqual(snapshot["active_procedure"], "following")
+        self.assertEqual(snapshot["skipped_nodes"], ["pump"])
+        self.assertNotIn("pump", snapshot["completed_nodes"])
+
+    def test_retry_and_skip_are_blocked_when_safe_shutdown_fails(self):
+        session = self.recoverable_timeout_session()
+        session.recoverable = False
+        session.failure["safe_shutdown_confirmed"] = False
+        snapshot = session.snapshot()
+        self.assertEqual(snapshot["screen"]["allowed_controls"], ["abort"])
+        with self.assertRaisesRegex(RuntimeEngineError, "cannot be retried safely"):
+            session.retry()
+        with self.assertRaisesRegex(RuntimeEngineError, "cannot be skipped safely"):
+            session.skip()
+
     def test_transition_order_follows_yaml_and_can_skip_states(self):
         execution = ProcedureExecution(
             load_yaml("prepare_brew.yml"),

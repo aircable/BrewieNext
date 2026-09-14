@@ -10,6 +10,7 @@ export type RuntimeProcedure = {
   state_elapsed_s: number;
   input: { key: string; options: string[] } | null;
   error: string | null;
+  failure?: BrewieScreen['failure'];
 };
 
 export type RuntimeStatus = {
@@ -24,6 +25,7 @@ export type RuntimeStatus = {
   step_count: number;
   active_nodes: string[];
   completed_nodes: string[];
+  skipped_nodes: string[];
   active_procedure: string | null;
   active_state: string | null;
   procedures: RuntimeProcedure[];
@@ -286,7 +288,7 @@ export async function loadRuntimeStatus(): Promise<RuntimeStatus> {
   return rememberRuntime(result.data);
 }
 
-export async function controlRuntime(action: 'pause' | 'resume' | 'abort' | 'set_speed', speed?: number): Promise<RuntimeStatus> {
+export async function controlRuntime(action: 'pause' | 'resume' | 'retry' | 'skip' | 'abort' | 'set_speed', speed?: number): Promise<RuntimeStatus> {
   const result = await request<{ data: RuntimeStatus }>('/api/runtime/session/control', {
     method: 'POST',
     body: JSON.stringify({ action, ...(speed === undefined ? {} : { speed }), ...commandMeta() })

@@ -371,9 +371,11 @@ class ProcedureExecution:
         self.state_elapsed_s = 0.0
         self.status = "running"
         self.error = None
+        self.failure = None
         self.log = []
         self._entered = False
         self._runtime_step_id = 0
+        self._state_entry_variables = {}
 
     @property
     def state(self):
@@ -475,12 +477,13 @@ class ProcedureExecution:
             return
         self._entered = True
         self.state_elapsed_s = 0.0
+        self._state_entry_variables = deepcopy(self.variables)
         self.log.append(f"Enter {self.current_state}")
         try:
             for action in self.state.get("action", []):
                 self._execute_action(action)
         except RuntimeEngineError as error:
-            self.fail(str(error))
+            self.fail(str(error), "runtime_error")
 
     def _timeout_exceeded(self):
         timeout = parse_duration(self.state.get("timeout_s") or self.state.get("timeout"))
@@ -543,6 +546,13 @@ class ProcedureExecution:
     def _transition(self, target):
         if target in {None, "loops"}:
             return False
+        pending_failure = None
+        if target == "error_handler" or (isinstance(target, str) and target.startswith("error-")):
+            handler = normalize_error_handler(self.data)
+            if handler not in self.states or handler == self.current_state:
+                kind = "timeout" if self._timeout_exceeded() else "transition_error"
+                message = f"External error handler '{handler or target}'"
+                pending_failure = self._failure_details(message, kind)
         try:
             self._run_on_exit()
         except RuntimeEngineError as error:
@@ -556,7 +566,11 @@ class ProcedureExecution:
             if handler in self.states and handler != self.current_state:
                 target = handler
             else:
-                self.fail(f"External error handler '{handler or target}'")
+                kind = "timeout" if self._timeout_exceeded() else "transition_error"
+                self.fail(
+                    f"External error handler '{handler or target}'", kind,
+                    details=pending_failure,
+                )
                 return True
         if target not in self.states:
             self.fail(f"Transition target '{target}' does not exist")
@@ -593,10 +607,57 @@ class ProcedureExecution:
         self.status = "aborted"
         self.log.append("Aborted by user")
 
-    def fail(self, message):
+    def _failure_details(self, message, kind):
+        env = self._condition_env()
+        criteria = []
+        transitions = self.state.get("transition", self.state.get("transitions", []))
+        for item in transitions if isinstance(transitions, list) else []:
+            condition, _, is_default = self._parse_transition(item)
+            if is_default or not isinstance(condition, str) or condition == "timeout_exceeded":
+                continue
+            try:
+                met = safe_eval_condition(condition, env, {
+                    "duration_reached": lambda duration: (
+                        (parse_duration(duration) or float("inf")) <= self.state_elapsed_s
+                    )
+                })
+            except RuntimeEngineError:
+                met = False
+            if met:
+                continue
+            observed = []
+            for name in dict.fromkeys(re.findall(r"\b[A-Za-z_]\w*\b", condition)):
+                value = env.get(name)
+                if isinstance(value, (str, int, float, bool)) and name != "timeout_exceeded":
+                    observed.append({"name": name, "value": value})
+            criteria.append({"expression": condition, "observed": observed})
+        return {
+            "kind": kind,
+            "procedure": self.name,
+            "state": self.current_state,
+            "state_description": self.state.get("description", self.current_state),
+            "message": message,
+            "timeout_s": parse_duration(self.state.get("timeout_s") or self.state.get("timeout")),
+            "elapsed_s": self.state_elapsed_s,
+            "criteria": criteria,
+        }
+
+    def fail(self, message, kind="runtime_error", details=None):
         self.error = message
+        self.failure = details or self._failure_details(message, kind)
         self.status = "error"
         self.log.append(f"ERROR: {message}")
+
+    def retry_current_state(self):
+        if self.status == "complete":
+            return
+        self.variables = deepcopy(self._state_entry_variables)
+        self.state_elapsed_s = 0.0
+        self.status = "running"
+        self.error = None
+        self.failure = None
+        self._entered = False
+        self.log.append(f"Retry {self.current_state}")
 
     def screen(self):
         notify = None
@@ -654,6 +715,7 @@ class ProcedureExecution:
             "input": definition if self.waiting_for_input() else None,
             "variables": deepcopy(self.variables),
             "error": self.error,
+            "failure": deepcopy(self.failure),
             "screen": self.screen(),
             "log": list(self.log[-30:]),
         }
@@ -676,12 +738,16 @@ class WorkflowSession:
         self.step_index = 0
         self.elapsed_s = 0.0
         self.completed_nodes = []
+        self.skipped_nodes = []
         self.error = None
+        self.failure = None
+        self.recoverable = False
         self.active = []
         self.log = []
         self._lock = threading.RLock()
         self._stop = threading.Event()
         self._thread = None
+        self._autostart = autostart
         if self.mode == "hardware":
             if not self.hal.connected():
                 raise RuntimeEngineError("AVR hardware is not connected")
@@ -765,7 +831,7 @@ class WorkflowSession:
                         item["execution"].tick(delta_s, parallel_primary_complete=primary_complete)
                     if any(item["execution"].status == "error" for item in self.active):
                         failed = next(item["execution"] for item in self.active if item["execution"].status == "error")
-                        self._fail(failed.error or f"{failed.name} failed")
+                        self._fail(failed.error or f"{failed.name} failed", failed.failure)
                         return
                     if primary_complete:
                         required = parallel.get("join", {}).get("require", {})
@@ -785,7 +851,7 @@ class WorkflowSession:
                     execution = self.active[0]["execution"]
                     execution.tick(delta_s)
                     if execution.status == "error":
-                        self._fail(execution.error or f"{execution.name} failed")
+                        self._fail(execution.error or f"{execution.name} failed", execution.failure)
                     elif execution.status == "complete":
                         self.completed_nodes.append(self.active[0]["node"]["id"])
                         self._advance()
@@ -796,13 +862,69 @@ class WorkflowSession:
                     item["execution"].waiting_for_input() for item in self.active
                 ) else "running"
 
-    def _fail(self, message):
+    def _fail(self, message, failure=None):
         self.error = message
+        self.failure = deepcopy(failure) if failure else {
+            "kind": "runtime_error", "message": message, "criteria": []
+        }
         self.status = "error"
+        self.recoverable = True
         try:
             self.hal.close_all()
         except RuntimeEngineError as close_error:
             self.error += f"; safe shutdown failed: {close_error}"
+            self.failure["safe_shutdown_error"] = str(close_error)
+            self.recoverable = False
+        self.failure["safe_shutdown_confirmed"] = self.recoverable
+
+    def _ensure_run_loop(self):
+        if not self._autostart:
+            return
+        if self._thread is not None and self._thread.is_alive():
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._run_loop, name="brewie-runtime", daemon=True)
+        self._thread.start()
+
+    def retry(self):
+        with self._lock:
+            if self.status != "error" or not self.recoverable:
+                raise RuntimeEngineError("This error cannot be retried safely")
+            try:
+                self.hal.close_all()
+            except RuntimeEngineError as error:
+                self.recoverable = False
+                self.error = f"Retry blocked because safe shutdown failed: {error}"
+                self.failure["safe_shutdown_confirmed"] = False
+                self.failure["safe_shutdown_error"] = str(error)
+                raise
+            for item in self.active:
+                item["execution"].retry_current_state()
+            self.error = None
+            self.failure = None
+            self.status = "running"
+            self.tick(0)
+            self._ensure_run_loop()
+
+    def skip(self):
+        with self._lock:
+            if self.status != "error" or not self.recoverable:
+                raise RuntimeEngineError("This error cannot be skipped safely")
+            try:
+                self.hal.close_all()
+            except RuntimeEngineError as error:
+                self.recoverable = False
+                self.error = f"Skip blocked because safe shutdown failed: {error}"
+                self.failure["safe_shutdown_confirmed"] = False
+                self.failure["safe_shutdown_error"] = str(error)
+                raise
+            self.skipped_nodes.extend(item["node"]["id"] for item in self.active)
+            self.error = None
+            self.failure = None
+            self.status = "running"
+            self._advance()
+            self.tick(0)
+            self._ensure_run_loop()
 
     def pause(self):
         with self._lock:
@@ -877,14 +999,21 @@ class WorkflowSession:
     def snapshot(self):
         with self._lock:
             procedures = [item["execution"].snapshot() for item in self.active]
-            primary = procedures[0] if procedures else None
+            display_index = 0
+            if self.status == "error":
+                display_index = next(
+                    (index for index, procedure in enumerate(procedures)
+                     if procedure["status"] == "error"),
+                    0,
+                )
+            primary = procedures[display_index] if procedures else None
             screen = primary["screen"] if primary else {
                 "title": "Brew complete", "message": "Brewing workflow completed.",
                 "footer_message": "", "readout_definitions": [], "choices": [], "progress": 100,
             }
             if primary:
                 screen["readouts"] = self._resolved_readouts(
-                    self.active[0]["execution"], screen.pop("readout_definitions", [])
+                    self.active[display_index]["execution"], screen.pop("readout_definitions", [])
                 )
             else:
                 screen["readouts"] = []
@@ -892,10 +1021,15 @@ class WorkflowSession:
             active_nodes = [item["node"]["id"] for item in self.active]
             if self.status == "error":
                 screen.update({
-                    "title": "Brew stopped",
+                    "title": "Brewing needs attention",
                     "message": self.error or (primary or {}).get("error") or "The procedure failed.",
-                    "footer_message": "All outputs were closed. Review the error before continuing.",
+                    "footer_message": (
+                        "All outputs are off. Choose retry, skip, or abort."
+                        if self.recoverable else
+                        "Safe shutdown was not confirmed. Disconnect heater power and abort."
+                    ),
                     "choices": [],
+                    "failure": deepcopy(self.failure),
                 })
             elif self.status == "aborted":
                 screen.update({
@@ -915,13 +1049,19 @@ class WorkflowSession:
                 "step_count": len(self.steps),
                 "active_nodes": active_nodes,
                 "completed_nodes": list(dict.fromkeys(self.completed_nodes)),
+                "skipped_nodes": list(dict.fromkeys(self.skipped_nodes)),
                 "active_procedure": primary["procedure"] if primary else None,
                 "active_state": primary["state"] if primary else None,
                 "procedures": procedures,
                 "screen": {
                     **screen,
                     "status": self.status,
-                    "allowed_controls": ["pause", "abort"] if self.status not in self.TERMINAL else ["reset"],
+                    "allowed_controls": (
+                        ["retry", "skip", "abort"] if self.status == "error" and self.recoverable
+                        else ["abort"] if self.status == "error"
+                        else ["pause", "abort"] if self.status not in self.TERMINAL
+                        else ["reset"]
+                    ),
                 },
                 "machine": self.hal.status(),
                 "error": self.error,
@@ -951,7 +1091,7 @@ class RuntimeManager:
             with open(self.state_file, "r", encoding="utf-8") as source:
                 saved = json.load(source)
             snapshot = saved.get("snapshot", {})
-            if saved.get("mode") == "hardware" and snapshot.get("status") not in WorkflowSession.TERMINAL:
+            if saved.get("mode") == "hardware" and snapshot.get("status") not in {"complete", "aborted"}:
                 self.interrupted = saved
                 self.revision = int(snapshot.get("revision", 0)) + 1
         except (OSError, ValueError, TypeError):
@@ -962,7 +1102,7 @@ class RuntimeManager:
             return
         if self.interrupted and not self.session:
             return
-        if not self.session or self.session.mode != "hardware" or self.session.status in WorkflowSession.TERMINAL:
+        if not self.session or self.session.mode != "hardware" or self.session.status in {"complete", "aborted"}:
             try:
                 os.unlink(self.state_file)
             except FileNotFoundError:
@@ -1042,6 +1182,7 @@ class RuntimeManager:
                 "id": None, "mode": None, "status": "idle", "revision": self.revision,
                 "speed": 1, "elapsed_s": 0, "workflow": None, "step_index": 0,
                 "step_count": 0, "active_nodes": [], "completed_nodes": [],
+                "skipped_nodes": [],
                 "active_procedure": None, "active_state": None, "procedures": [],
                 "screen": {"title": "Select a program", "message": "Choose a program to begin.",
                            "footer_message": "", "readouts": [], "choices": [], "progress": None,

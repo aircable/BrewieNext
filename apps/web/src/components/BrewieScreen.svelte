@@ -10,6 +10,7 @@
   let screenView: 'procedure' | 'machine' = initialView || (typeof window !== 'undefined' && window.location.search.indexOf('machine=1') !== -1 ? 'machine' : 'procedure');
   let touchMarker = { visible: false, x: 0, y: 0 };
   $: recovering = session.screen.allowed_controls?.includes('recover');
+  $: failure = session.screen.failure;
   $: terminal = ['complete', 'error', 'aborted'].includes(session.status);
   $: primaryControl = session.status === 'idle' ? 'start' : terminal ? 'restart' : 'pause';
   $: primaryLabel = session.status === 'paused' ? 'RESUME' : primaryControl.toUpperCase();
@@ -24,6 +25,10 @@
   function control(control: string) {
     activate(control);
     onControl(control);
+  }
+
+  function readable(value: string) {
+    return value.replace(/_/g, ' ');
   }
 
   function offsetWithinScreen(element: HTMLElement, screen: HTMLElement) {
@@ -49,7 +54,10 @@
     const portraitY = 480 - Math.round(touch.clientX - rect.left);
     touchMarker = { visible: true, x: portraitX, y: portraitY };
     if (event.type !== 'touchstart') return;
-    const controls = Array.from(screen.querySelectorAll<HTMLElement>('[data-touch-control]'));
+    const selector = session.status === 'error'
+      ? '.runtime-error-overlay [data-touch-control]'
+      : '[data-touch-control]';
+    const controls = Array.from(screen.querySelectorAll<HTMLElement>(selector));
     const hit = controls.find((control) => {
       const position = offsetWithinScreen(control, screen);
       return portraitX >= position.left && portraitX < position.left + control.offsetWidth
@@ -67,7 +75,7 @@
   {#if touchMarker.visible}
     <div class="touch-marker" style={`left: ${touchMarker.x - 10}px; top: ${touchMarker.y - 10}px;`} aria-hidden="true"></div>
   {/if}
-  <header><strong>BREWIE NEXT</strong><span class:paused={session.status === 'paused'}>{session.status.toUpperCase()}</span></header>
+  <header><strong>BREWIE NEXT</strong><span class:paused={session.status === 'paused'} class:error={session.status === 'error'}>{session.status === 'error' ? 'ATTENTION' : session.status.toUpperCase()}</span></header>
   <div class:machine-view={screenView === 'machine'} class:procedure-view={screenView === 'procedure'} class="screen-body">
     {#if screenView === 'procedure'}
       <h2>{session.screen.title}</h2>
@@ -130,5 +138,36 @@
     <button class="screen-view-toggle" data-touch-control="screen-view" class:pressed={activeControl === 'screen-view'} on:click={() => { activate('screen-view'); screenView = 'machine'; }}>
       MACHINE STATUS
     </button>
+  {/if}
+  {#if session.status === 'error' && failure}
+    <div class="runtime-error-overlay" role="alertdialog" aria-modal="true" aria-label="Brewing needs attention">
+      <div class="runtime-error-card">
+        <strong>{failure.kind === 'timeout' ? 'STEP TIMED OUT' : 'PROCEDURE ERROR'}</strong>
+        <h2>{failure.state_description || readable(failure.state || 'Unknown state')}</h2>
+        {#if failure.timeout_s}
+          <p>No valid transition occurred within {Math.round(failure.timeout_s)} seconds.</p>
+        {:else}
+          <p>{failure.message}</p>
+        {/if}
+        {#each (failure.criteria || []).slice(0, 2) as criterion}
+          <div class="error-criterion">
+            <span>Required</span><code>{readable(criterion.expression)}</code>
+            {#if criterion.observed?.length}
+              <small>Observed: {criterion.observed.map((item) => `${readable(item.name)} = ${item.value}`).join(', ')}</small>
+            {/if}
+          </div>
+        {/each}
+        {#if failure.safe_shutdown_confirmed === false}
+          <p class="shutdown-warning">Outputs could not be confirmed safe. Disconnect heater power.</p>
+        {/if}
+        <div class="error-actions" class:single={!session.screen.allowed_controls.includes('retry')}>
+          {#if session.screen.allowed_controls.includes('retry')}
+            <button data-touch-control="retry" class:pressed={activeControl === 'retry'} on:click={() => control('retry')}>RETRY</button>
+            <button data-touch-control="skip" class:pressed={activeControl === 'skip'} on:click={() => control('skip')}>SKIP</button>
+          {/if}
+          <button data-touch-control="abort" class="danger" class:pressed={activeControl === 'abort'} on:click={() => control('abort')}>ABORT</button>
+        </div>
+      </div>
+    </div>
   {/if}
 </section>
