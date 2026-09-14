@@ -5,7 +5,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from avr_serial import AvrSerialBridge, encode_command, parse_status_record
+from avr_serial import AvrSerialBridge, AvrSerialError, encode_command, parse_status_record
 from editor_backend import app
 
 
@@ -93,12 +93,12 @@ class AvrSerialProtocolTests(unittest.TestCase):
         self.assertEqual(bridge.payloads, ["P110", "P111"])
         self.assertFalse(bridge.status()["valves"]["water_inlet_valve"])
 
-    def test_close_all_uses_p999_and_clears_outputs(self):
+    def test_close_all_disables_heaters_before_p999_and_clears_outputs(self):
         bridge = RecordingBridge()
         bridge.set_device("mash_pump", "on")
         bridge.set_heater_target("mash_heater", 65)
         bridge.close_all()
-        self.assertEqual(bridge.payloads[-1], "P999")
+        self.assertEqual(bridge.payloads[-3:], ["P150 0", "P151 0", "P999"])
         status = bridge.status()
         self.assertFalse(status["pumps"]["mash_pump"])
         self.assertEqual(status["heaters"]["mash_heater"]["state"], "off")
@@ -109,7 +109,7 @@ class AvrSerialProtocolTests(unittest.TestCase):
         bridge._safe_start_complete = False
         bridge._initialization_complete = False
         bridge._perform_safe_start()
-        self.assertEqual(bridge.payloads, ["P999"])
+        self.assertEqual(bridge.payloads, ["P150 0", "P151 0", "P999"])
         self.assertTrue(bridge.status()["safeStartComplete"])
         self.assertFalse(bridge.status()["initializationComplete"])
 
@@ -122,7 +122,8 @@ class AvrSerialProtocolTests(unittest.TestCase):
         bridge._perform_safe_start()
         self.assertEqual(
             bridge.payloads,
-            ["P999", "P80 18996.080294 0.000000 0.81854 1.70194 100.00"],
+            ["P150 0", "P151 0", "P999",
+             "P80 18996.080294 0.000000 0.81854 1.70194 100.00"],
         )
         self.assertTrue(bridge.status()["initializationComplete"])
 
@@ -134,7 +135,8 @@ class AvrSerialProtocolTests(unittest.TestCase):
         bridge.prepare_hardware_session()
         self.assertEqual(
             bridge.payloads,
-            ["P999", "P80 18996.080294 0.000000 0.81854 1.70194 100.00"],
+            ["P150 0", "P151 0", "P999",
+             "P80 18996.080294 0.000000 0.81854 1.70194 100.00"],
         )
         self.assertTrue(bridge.status()["safeStartComplete"])
         self.assertTrue(bridge.status()["initializationComplete"])
@@ -151,7 +153,7 @@ class AvrSerialProtocolTests(unittest.TestCase):
 
         def fake_avr():
             try:
-                for _ in range(2):
+                for _ in range(4):
                     frame = os.read(master_fd, 256)
                     packet_id = frame[1]
                     length = frame[2]
@@ -173,9 +175,11 @@ class AvrSerialProtocolTests(unittest.TestCase):
         )
         try:
             deadline = time.monotonic() + 3
-            while time.monotonic() < deadline and not bridge.status()["connected"]:
+            while time.monotonic() < deadline and not bridge.status()["initializationComplete"]:
                 time.sleep(0.02)
             self.assertEqual(received, [
+                "P150 0",
+                "P151 0",
                 "P999",
                 "P80 18996.080294 0.000000 0.81854 1.70194 100.00",
             ])
@@ -220,7 +224,17 @@ class AvrSerialProtocolTests(unittest.TestCase):
                 headers={"Origin": "http://localhost:5173"},
             )
             self.assertEqual(response.status_code, 200, response.get_json())
-            self.assertEqual(bridge.payloads, ["P999"])
+            self.assertEqual(bridge.payloads, ["P150 0", "P151 0", "P999"])
+
+    def test_close_all_reports_a_heater_that_remains_physically_active(self):
+        bridge = RecordingBridge()
+        bridge.enabled = True
+        bridge._fd = object()
+        bridge._heaters["boil_heater"]["output"] = True
+        with patch.object(bridge, "_wait_for_next_status"):
+            with self.assertRaisesRegex(AvrSerialError, "heater output remained active"):
+                bridge.close_all()
+        self.assertEqual(bridge.payloads, ["P150 0", "P151 0"])
 
 
 if __name__ == "__main__":

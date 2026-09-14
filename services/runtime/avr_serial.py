@@ -193,10 +193,6 @@ class AvrSerialBridge:
 
     def _perform_safe_start(self, confirm_initialization_status=False):
         self.close_all()
-        if self.enabled:
-            self._wait_for_next_status(
-                "AVR close-all completion status was not received", timeout=15.0
-            )
         with self._state_lock:
             self._safe_start_complete = True
         if self.calibration:
@@ -454,13 +450,59 @@ class AvrSerialBridge:
             self._save_state()
 
     def close_all(self):
-        self.send_payload("P999")
+        # Belt-and-suspenders shutdown: explicitly disable both heater targets
+        # and confirm their physical outputs before resetting the AVR state
+        # machine. This protects older firmware whose bare-P999 path could stop
+        # its control loop while an output pin was still energized.
+        errors = []
+        for payload in ("P150 0", "P151 0"):
+            try:
+                self.send_payload(payload)
+            except AvrSerialError as error:
+                errors.append("%s: %s" % (payload.split(" ", 1)[0], error))
+
+        heaters_still_on = []
+        if self.enabled and self._fd is not None:
+            with self._state_lock:
+                after_sequence = self._status_sequence
+            try:
+                self._wait_for_next_status(
+                    "AVR status was not received after safe shutdown",
+                    after_sequence=after_sequence,
+                    timeout=3.5,
+                )
+            except AvrSerialError as error:
+                errors.append(str(error))
+            with self._state_lock:
+                heaters_still_on = [
+                    device_id for device_id, heater in self._heaters.items()
+                    if heater["output"]
+                ]
+            if heaters_still_on:
+                errors.append(
+                    "heater output remained active after disable commands: %s"
+                    % ", ".join(heaters_still_on)
+                )
+
+        # Never send the legacy reset until both heater-off commands succeeded
+        # and fresh telemetry confirms that neither physical output is active.
+        # Test/simulation bridges have no transport or physical outputs.
+        if not errors or not self.enabled:
+            try:
+                self.send_payload("P999")
+            except AvrSerialError as error:
+                errors.append("P999: %s" % error)
+
         with self._state_lock:
             self._valves = {device_id: False for device_id in self.VALVES}
             self._pumps = {device_id: False for device_id in self.PUMPS}
             for heater in self._heaters.values():
-                heater.update({"targetC": None, "output": False})
+                heater["targetC"] = None
+                if not self.enabled:
+                    heater["output"] = False
             self._save_state()
+        if errors:
+            raise AvrSerialError("; ".join(errors))
 
     def reset_level(self):
         with self._state_lock:
