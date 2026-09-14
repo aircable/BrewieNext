@@ -95,7 +95,9 @@ def parse_status_record(record):
         "mash_pump_tacho": number(11),
         "boil_pump_tacho": number(12),
         "mash_pump_diagnostic": int(number(13)),
+        "mash_pump_current": number(14),
         "boil_pump_diagnostic": int(number(15)),
+        "boil_pump_current": number(16),
         "mash_heater_output": bool(int(number(17))),
         "boil_heater_output": bool(int(number(18))),
     }
@@ -148,6 +150,7 @@ class AvrSerialBridge:
             "boilVolumeL": 0.0, "mashVolumeL": 0.0,
             "systemWeightKg": 0.0,
             "mashPumpTacho": 0.0, "boilPumpTacho": 0.0,
+            "mashPumpCurrent": 0.0, "boilPumpCurrent": 0.0,
             "mashPumpDiagnostic": 0, "boilPumpDiagnostic": 0,
         }
         self._load_state()
@@ -354,6 +357,8 @@ class AvrSerialBridge:
                 "boilVolumeL": max(0.0, parsed["water_volume_l"] - self._volume_zero_l),
                 "mashPumpTacho": parsed["mash_pump_tacho"],
                 "boilPumpTacho": parsed["boil_pump_tacho"],
+                "mashPumpCurrent": parsed["mash_pump_current"],
+                "boilPumpCurrent": parsed["boil_pump_current"],
                 "mashPumpDiagnostic": parsed["mash_pump_diagnostic"],
                 "boilPumpDiagnostic": parsed["boil_pump_diagnostic"],
             })

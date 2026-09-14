@@ -72,6 +72,8 @@ class SimulatedHAL:
             "systemWeightKg": 0.0,
             "mashPumpTacho": 0.0,
             "boilPumpTacho": 0.0,
+            "mashPumpCurrent": 0.0,
+            "boilPumpCurrent": 0.0,
             "mashPumpDiagnostic": 0,
             "boilPumpDiagnostic": 0,
         }
@@ -210,6 +212,8 @@ class SimulatedHAL:
 
         self.sensors["mashPumpTacho"] = 220 if self.pumps.get("mash_pump") else 0
         self.sensors["boilPumpTacho"] = 220 if self.pumps.get("boil_pump") else 0
+        self.sensors["mashPumpCurrent"] = 300 if self.pumps.get("mash_pump") else 0
+        self.sensors["boilPumpCurrent"] = 300 if self.pumps.get("boil_pump") else 0
         self.sensors["mashPumpDiagnostic"] = (
             1 if self.pumps.get("mash_pump") and self.sensors["mashVolumeL"] > 1.5
             else 2 if self.pumps.get("mash_pump") else 0
@@ -230,6 +234,8 @@ class SimulatedHAL:
             "water_volume": sensors["boilVolumeL"],
             "mash_pump_tacho": sensors["mashPumpTacho"],
             "boil_pump_tacho": sensors["boilPumpTacho"],
+            "mash_pump_current": sensors["mashPumpCurrent"],
+            "boil_pump_current": sensors["boilPumpCurrent"],
             "mash_pump_diagnostic": sensors["mashPumpDiagnostic"],
             "boil_pump_diagnostic": sensors["boilPumpDiagnostic"],
         }
@@ -346,6 +352,8 @@ class AvrHAL:
             "water_volume": sensors.get("boilVolumeL", 0.0),
             "mash_pump_tacho": sensors.get("mashPumpTacho", 0.0),
             "boil_pump_tacho": sensors.get("boilPumpTacho", 0.0),
+            "mash_pump_current": sensors.get("mashPumpCurrent", 0.0),
+            "boil_pump_current": sensors.get("boilPumpCurrent", 0.0),
             "mash_pump_diagnostic": sensors.get("mashPumpDiagnostic", 0),
             "boil_pump_diagnostic": sensors.get("boilPumpDiagnostic", 0),
         }

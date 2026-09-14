@@ -65,6 +65,8 @@ class AvrSerialProtocolTests(unittest.TestCase):
         self.assertEqual(parsed["boil_pump_tacho"], 20)
         self.assertEqual(parsed["mash_pump_diagnostic"], 1)
         self.assertEqual(parsed["boil_pump_diagnostic"], 2)
+        self.assertEqual(parsed["mash_pump_current"], 187)
+        self.assertEqual(parsed["boil_pump_current"], 21)
         self.assertTrue(parsed["mash_heater_output"])
         self.assertFalse(parsed["boil_heater_output"])
 

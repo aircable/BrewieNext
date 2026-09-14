@@ -314,18 +314,24 @@ devices:
     kind: sensor
     aliases: [tachoMashPump]
     capabilities: [read]
-    implementation_status: ready
+    implementation_status: unresolved
     telemetry: {transport: avr_status, field: mash_pump_tacho, unit: raw}
-    evidence: {status: confirmed, sources: [../ReBrewieAVR/ReBrewie/ReBrewie.ino:257-267]}
+    evidence:
+      status: confirmed
+      sources: [../ReBrewieAVR/ReBrewie/ReBrewie.ino:257-267, ../ReBrewieAVR/ReBrewie/HardwareConfig.h:30-46]
+      note: The status field exists, but Brewie B20 has no usable tachometer input; use mash_pump_current for B20 procedures.
 
   boil_pump_tacho:
     display_name: Boil-pump tachometer
     kind: sensor
     aliases: [tachoBoilPump]
     capabilities: [read]
-    implementation_status: ready
+    implementation_status: unresolved
     telemetry: {transport: avr_status, field: boil_pump_tacho, unit: raw}
-    evidence: {status: confirmed, sources: [../ReBrewieAVR/ReBrewie/ReBrewie.ino:257-267]}
+    evidence:
+      status: confirmed
+      sources: [../ReBrewieAVR/ReBrewie/ReBrewie.ino:257-267, ../ReBrewieAVR/ReBrewie/HardwareConfig.h:30-46]
+      note: The status field exists, but Brewie B20 has no usable tachometer input; use boil_pump_current for B20 procedures.
 
   mash_pump_diagnostic:
     display_name: Mash-pump AVR diagnostic

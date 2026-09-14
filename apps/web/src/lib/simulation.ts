@@ -17,6 +17,8 @@ export type MachineStatus = {
     systemWeightKg: number;
     mashPumpTacho: number;
     boilPumpTacho: number;
+    mashPumpCurrent: number;
+    boilPumpCurrent: number;
   };
 };
 
@@ -76,7 +78,8 @@ export function createIdleMachineStatus(): MachineStatus {
     },
     sensors: {
       tempMashC: 20, tempBoilC: 20, boilVolumeL: 0, mashVolumeL: 0,
-      systemWeightKg: 0, mashPumpTacho: 0, boilPumpTacho: 0
+      systemWeightKg: 0, mashPumpTacho: 0, boilPumpTacho: 0,
+      mashPumpCurrent: 0, boilPumpCurrent: 0
     }
   };
 }
@@ -207,7 +210,9 @@ function resolvedReadouts(definitions: ReadoutDefinition[], machine: MachineStat
     weight_boil_tank: machine.sensors.boilVolumeL,
     water_volume: machine.sensors.boilVolumeL,
     mash_pump_tacho: machine.sensors.mashPumpTacho,
-    boil_pump_tacho: machine.sensors.boilPumpTacho
+    boil_pump_tacho: machine.sensors.boilPumpTacho,
+    mash_pump_current: machine.sensors.mashPumpCurrent,
+    boil_pump_current: machine.sensors.boilPumpCurrent
   };
   return definitions.map((definition) => {
     const raw = definition.sensor ? sensors[definition.sensor] : definition.global ? globals[definition.global] : undefined;
@@ -329,6 +334,8 @@ export function simulationSnapshot(plan: SimulationPlan, recipe: Recipe, elapsed
   machine.sensors.systemWeightKg = machine.sensors.boilVolumeL + machine.sensors.mashVolumeL;
   machine.sensors.mashPumpTacho = machine.pumps.mash_pump ? 220 : 0;
   machine.sensors.boilPumpTacho = machine.pumps.boil_pump ? 220 : 0;
+  machine.sensors.mashPumpCurrent = machine.pumps.mash_pump ? 300 : 0;
+  machine.sensors.boilPumpCurrent = machine.pumps.boil_pump ? 300 : 0;
   for (const heater of Object.values(machine.heaters)) if (heater.active && heater.targetC !== null) heater.powerPercent = 65;
   const activeStep = plan.steps[activeIndex];
   const complete = elapsed >= plan.totalSeconds;

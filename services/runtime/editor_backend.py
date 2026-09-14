@@ -192,6 +192,8 @@ class ProcedureRunner:
             "boil_pump_diagnostic": 0,
             "mash_pump_tacho": 0,
             "boil_pump_tacho": 0,
+            "mash_pump_current": 0.0,
+            "boil_pump_current": 0.0,
             "water_volume": 0.0,
             "tachoBoilPump": 0,
             "tachoMashPump": 0,

@@ -34,7 +34,7 @@ class RuntimeProcedureTests(unittest.TestCase):
                     "action": [{"set_pump": {"device": "mash_pump", "state": "on"}}],
                     "timeout_s": "1s",
                     "transition": [
-                        {"mash_pump_tacho > 500": "next_phase"},
+                        {"mash_pump_current > 500": "next_phase"},
                         {"timeout_exceeded": "error_handler"},
                         {"default": "loops"},
                     ],
@@ -66,10 +66,10 @@ class RuntimeProcedureTests(unittest.TestCase):
         failure = snapshot["screen"]["failure"]
         self.assertEqual(failure["kind"], "timeout")
         self.assertEqual(failure["state_description"], "Establish mash circulation")
-        self.assertEqual(failure["criteria"][0]["expression"], "mash_pump_tacho > 500")
+        self.assertEqual(failure["criteria"][0]["expression"], "mash_pump_current > 500")
         self.assertEqual(
             failure["criteria"][0]["observed"],
-            [{"name": "mash_pump_tacho", "value": 220}],
+            [{"name": "mash_pump_current", "value": 300}],
         )
         self.assertTrue(failure["safe_shutdown_confirmed"])
 

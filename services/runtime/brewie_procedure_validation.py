@@ -100,6 +100,7 @@ KNOWN_SENSORS = [
     "weight_boil_tank", "weight_mash_tank", "weight_source_tank",
     "weight_destination_tank", "temp_boil_tank", "temp_mash_tank",
     "temp_water_manual", "pump_tacho", "pump_current",
+    "mash_pump_current", "boil_pump_current",
     "mash_pump_diagnostic", "boil_pump_diagnostic",
     "water_volume", "mash_pump_tacho", "boil_pump_tacho",
     "mash_pump_diagnostics", "boil_pump_diagnostics",
