@@ -42,6 +42,15 @@ class AvrSerialProtocolTests(unittest.TestCase):
             b"$\x07\x08P150 675 *\r\n",
         )
 
+    def test_packet_ids_skip_serial_record_delimiters(self):
+        bridge = RecordingBridge()
+        bridge._packet_id = 9
+        self.assertEqual(bridge._next_packet_id(), 11)
+        bridge._packet_id = 12
+        self.assertEqual(bridge._next_packet_id(), 14)
+        bridge._packet_id = 255
+        self.assertEqual(bridge._next_packet_id(), 1)
+
     def test_status_parser_extracts_tank_pump_and_heater_fields(self):
         fields = [
             "-1", "42", "", "", "V15", "1234", "18.5", "64.2", "71.3",

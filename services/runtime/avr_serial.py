@@ -366,8 +366,13 @@ class AvrSerialBridge:
             self._status_condition.notify_all()
 
     def _next_packet_id(self):
-        self._packet_id = self._packet_id % 255 + 1
-        return self._packet_id
+        # ACKs carry the packet id as a raw byte inside a CR/LF-terminated
+        # record. A CR or LF packet id would corrupt that record boundary in
+        # the line-oriented reader, so never allocate either delimiter.
+        while True:
+            self._packet_id = self._packet_id % 255 + 1
+            if self._packet_id not in {ord("\r"), ord("\n")}:
+                return self._packet_id
 
     def send_payload(self, payload, timeout=0.7, attempts=2):
         if not self.enabled or self._fd is None:
