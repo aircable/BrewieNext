@@ -96,17 +96,17 @@ install_pinned_programs() {
     rm -rf "$PROGRAM_STAGE"
   fi
 
-  if [ -f "$PROGRAM_BASE/current/bundle-manifest.json" ]; then
-    echo "Preserving active procedure program release"
-  else
-    rm -f "$PROGRAM_BASE/current"
+  if [ "$(readlink "$PROGRAM_BASE/current" 2>/dev/null || true)" != "releases/$PROGRAM_VERSION" ]; then
     activate_programs
-    echo "Activated initial procedure programs $PROGRAM_VERSION"
+    echo "Activated pinned procedure programs $PROGRAM_VERSION"
+  else
+    echo "Procedure programs $PROGRAM_VERSION already active"
   fi
 }
 
 if [ -e "$RELEASES/$VERSION" ]; then
   RELEASE="$RELEASES/$VERSION"
+  install_pinned_programs
   install_landing_page
   activate_app
   restart_services
