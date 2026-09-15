@@ -65,6 +65,18 @@ PROCEDURES_DIR = os.environ.get("PROCEDURES_DIR", str(BREWIE_ROOT))
 PROCEDURES_CREATE_DIR = os.environ.get("PROCEDURES_CREATE_DIR", PROCEDURES_DIR)
 SCHEMA_PATH    = os.environ.get("SCHEMA_PATH",    str(BACKEND_DIR / "procedure.schema.json"))
 GRAPH_SCHEMA_PATH = os.environ.get("GRAPH_SCHEMA_PATH", str(BACKEND_DIR / "procedure-graph.schema.json"))
+PROGRAM_SOURCE_DIR = Path(os.environ.get(
+    "BREWIE_PROGRAM_SOURCE", "/var/lib/brewie/programs/source"
+))
+# Application releases can be installed on an older ReLinux image whose init
+# script still selects the immutable bundle. Once a source checkout exists, it
+# is the machine's authoritative authoring copy and must survive app upgrades
+# and reboots without requiring another OS image.
+if (PROGRAM_SOURCE_DIR / "workflows/beer_brewing.yml").is_file():
+    PROCEDURES_DIR = str(PROGRAM_SOURCE_DIR)
+    PROCEDURES_CREATE_DIR = str(PROGRAM_SOURCE_DIR / "procedures/brewing")
+    SCHEMA_PATH = str(PROGRAM_SOURCE_DIR / "schemas/procedure.schema.json")
+    GRAPH_SCHEMA_PATH = str(PROGRAM_SOURCE_DIR / "schemas/workflow.schema.json")
 RECIPE_SCHEMA_PATH = os.environ.get("RECIPE_SCHEMA_PATH", str(BACKEND_DIR / "recipe.schema.json"))
 BUNDLED_RECIPES_DIR = os.environ.get("BUNDLED_RECIPES_DIR", str(BREWIE_ROOT / "recipes"))
 RECIPES_DIR = os.environ.get("RECIPES_DIR", BUNDLED_RECIPES_DIR)
@@ -102,7 +114,7 @@ AVR_BRIDGE = AvrSerialBridge(
 RUNTIME_MANAGER = RuntimeManager(AVR_BRIDGE, RUNTIME_STATE_FILE)
 PROGRAM_SYNC = ProgramSync(
     os.environ.get("BREWIE_GITHUB_CONFIG", "/etc/brewie/github.json"),
-    os.environ.get("BREWIE_PROGRAM_SOURCE", "/var/lib/brewie/programs/source"),
+    str(PROGRAM_SOURCE_DIR),
 )
 # Loading changes the documents used by future sessions. Starting a session and
 # activating a fetched checkout must therefore be mutually exclusive.
