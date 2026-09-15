@@ -2207,8 +2207,8 @@ def api_runtime_navigate():
         return denied
     body = request.get_json(silent=True) or {}
     direction = body.get("direction")
-    if direction not in {"previous", "next"}:
-        return jsonify({"error": "Direction must be previous or next"}), 400
+    if direction not in {"previous", "next", "next_state"}:
+        return jsonify({"error": "Direction must be previous, next, or next_state"}), 400
     try:
         return jsonify({"data": _runtime_command(
             body, lambda: RUNTIME_MANAGER.require().navigate(direction)

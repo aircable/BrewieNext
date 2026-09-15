@@ -185,6 +185,43 @@ class RuntimeProcedureTests(unittest.TestCase):
         self.assertFalse(hal.pumps["boil_pump"])
         self.assertEqual(session.snapshot()["active_procedure"], "second")
 
+    def test_next_state_runs_cleanup_and_exposes_live_remaining_time(self):
+        procedure = {
+            "name": "timed_process",
+            "start_state": "timed_hold",
+            "states": {
+                "timed_hold": {
+                    "description": "Hold process temperature",
+                    "action": [
+                        {"set_pump": {"device": "mash_pump", "state": "on"}},
+                        {"notify_user": {"readouts": [
+                            {"label": "Time remaining", "remaining_state_time": True},
+                        ]}},
+                    ],
+                    "on_exit": [{"set_pump": {"device": "mash_pump", "state": "off"}}],
+                    "transition": [
+                        {"duration_reached(120)": "finish"},
+                        {"default": "loops"},
+                    ],
+                },
+                "finish": {
+                    "description": "Finished",
+                    "action": [],
+                    "transition": [{"default": "loops"}],
+                },
+            },
+        }
+        workflow = {"name": "test", "steps": [{"id": "timed", "procedure": "timed_process"}]}
+        hal = SimulatedHAL()
+        session = WorkflowSession(workflow, {"timed_process": procedure}, {}, hal, autostart=False)
+        session.tick(30)
+        snapshot = session.snapshot()
+        self.assertEqual(snapshot["screen"]["readouts"][0]["value"], "1:30")
+        self.assertIn("next_state", snapshot["screen"]["allowed_controls"])
+        session.navigate("next_state")
+        self.assertEqual(session.snapshot()["active_state"], "finish")
+        self.assertFalse(hal.pumps["mash_pump"])
+
     def test_current_workflow_completes_in_authoritative_simulation(self):
         workflow = load_yaml("beer_brewing.yml")
         names = []

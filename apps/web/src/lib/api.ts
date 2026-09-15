@@ -304,7 +304,7 @@ export async function provideRuntimeInput(key: string, value: string, procedure?
   return rememberRuntime(result.data);
 }
 
-export async function navigateRuntime(direction: 'previous' | 'next'): Promise<RuntimeStatus> {
+export async function navigateRuntime(direction: 'previous' | 'next' | 'next_state'): Promise<RuntimeStatus> {
   const result = await request<{ data: RuntimeStatus }>('/api/runtime/session/navigate', {
     method: 'POST',
     body: JSON.stringify({ direction, ...commandMeta() })

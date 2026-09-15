@@ -531,7 +531,16 @@
         if (kioskMode || runtimeSnapshot?.mode === 'hardware') await startHardwareRuntime();
         else await resetSimulation();
       }
-      else if (control === 'previous_procedure' || control === 'next_procedure') {
+      else if (control === 'next_state') {
+        if (!await ask(
+          'Advance to next state?',
+          `End ${runtimeSnapshot?.active_state?.replace(/_/g, ' ') || 'the current state'} now and run its cleanup actions?`,
+          'NEXT STATE',
+          true
+        )) return;
+        applyRuntimeSnapshot(await navigateRuntime('next_state'));
+        message = `Runner advanced to ${runtimeSnapshot?.active_state?.replace(/_/g, ' ')}.`;
+      } else if (control === 'previous_procedure' || control === 'next_procedure') {
         applyRuntimeSnapshot(await navigateRuntime(control === 'previous_procedure' ? 'previous' : 'next'));
         message = `Runner moved to ${runtimeSnapshot?.active_procedure?.replace(/_/g, ' ')}.`;
       } else if (control === 'programs') {

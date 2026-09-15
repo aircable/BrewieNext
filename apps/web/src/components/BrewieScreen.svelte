@@ -79,6 +79,9 @@
   <div class:machine-view={screenView === 'machine'} class:procedure-view={screenView === 'procedure'} class="screen-body">
     {#if screenView === 'procedure'}
       <h2>{session.screen.title}</h2>
+      {#if session.active_state}
+        <div class="active-state">STATE · {readable(session.active_state).toUpperCase()}</div>
+      {/if}
       <p>{session.screen.message}</p>
       <div class="procedure-progress">
         {#if session.screen.progress !== null}
@@ -107,8 +110,11 @@
             <button data-touch-control="programs" class:pressed={activeControl === 'programs'} on:click={() => control('programs')}>← PROGRAMS</button>
           </div>
         {:else}
-          <div class="procedure-navigation">
+          <div class="procedure-navigation" class:three={session.screen.allowed_controls.includes('next_state')}>
             <button data-touch-control="previous_procedure" class:pressed={activeControl === 'previous_procedure'} on:click={() => control('previous_procedure')}>PREVIOUS<br>PROCEDURE</button>
+            {#if session.screen.allowed_controls.includes('next_state')}
+              <button data-touch-control="next_state" class:pressed={activeControl === 'next_state'} on:click={() => control('next_state')}>NEXT<br>STATE</button>
+            {/if}
             <button data-touch-control="next_procedure" class:pressed={activeControl === 'next_procedure'} on:click={() => control('next_procedure')}>NEXT<br>PROCEDURE</button>
           </div>
         {/if}

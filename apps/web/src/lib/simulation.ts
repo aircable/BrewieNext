@@ -39,7 +39,7 @@ type SimulationStep = {
   targets: SensorTargets;
 };
 
-type ReadoutDefinition = { label: string; sensor?: string; global?: string; unit?: string };
+type ReadoutDefinition = { label: string; sensor?: string; global?: string; unit?: string; remainingStateTime?: boolean };
 type UserInputDefinition = { id: string; key: string; options: string[] };
 
 export type SimulationPlan = { steps: SimulationStep[]; totalSeconds: number };
@@ -174,7 +174,8 @@ function notification(state: ProcedureDocument['states'][number] | undefined, fa
           label: item.label,
           ...(typeof item.sensor === 'string' ? { sensor: item.sensor } : {}),
           ...(typeof item.global === 'string' ? { global: item.global } : {}),
-          ...(typeof item.unit === 'string' ? { unit: item.unit } : {})
+          ...(typeof item.unit === 'string' ? { unit: item.unit } : {}),
+          ...(item.remaining_state_time === true ? { remainingStateTime: true } : {})
         }];
       })
     : [];
@@ -203,7 +204,7 @@ function userInput(procedure: string, stateId: string, state: ProcedureDocument[
   };
 }
 
-function resolvedReadouts(definitions: ReadoutDefinition[], machine: MachineStatus, globals: Record<string, unknown>) {
+function resolvedReadouts(definitions: ReadoutDefinition[], machine: MachineStatus, globals: Record<string, unknown>, remainingSeconds?: number) {
   const sensors: Record<string, unknown> = {
     temp_mash_tank: machine.sensors.tempMashC,
     temp_boil_tank: machine.sensors.tempBoilC,
@@ -215,9 +216,14 @@ function resolvedReadouts(definitions: ReadoutDefinition[], machine: MachineStat
     boil_pump_current: machine.sensors.boilPumpCurrent
   };
   return definitions.map((definition) => {
-    const raw = definition.sensor ? sensors[definition.sensor] : definition.global ? globals[definition.global] : undefined;
+    const raw = definition.remainingStateTime ? remainingSeconds
+      : definition.sensor ? sensors[definition.sensor]
+      : definition.global ? globals[definition.global] : undefined;
+    const remainingTotal = typeof raw === 'number' && definition.remainingStateTime ? Math.ceil(raw) : null;
     const value = typeof raw === 'number'
-      ? (Number.isInteger(raw) ? String(raw) : raw.toFixed(1))
+      ? definition.remainingStateTime
+        ? `${Math.floor(remainingTotal! / 60)}:${String(remainingTotal! % 60).padStart(2, '0')}`
+        : (Number.isInteger(raw) ? String(raw) : raw.toFixed(1))
       : raw === undefined || raw === null ? '—' : String(raw);
     return { label: definition.label, value, ...(definition.unit ? { unit: definition.unit } : {}) };
   });
@@ -358,7 +364,12 @@ export function simulationSnapshot(plan: SimulationPlan, recipe: Recipe, elapsed
         message: complete ? 'The simulated brewing process has completed.' : activeStep.message,
         footer_message: complete ? '' : activeStep.footerMessage,
         status: complete ? 'complete' : waiting ? 'waiting_for_input' : 'running',
-        readouts: complete ? [] : resolvedReadouts(activeStep.readouts, machine, globals),
+        readouts: complete ? [] : resolvedReadouts(
+          activeStep.readouts,
+          machine,
+          globals,
+          Math.max(0, activeStep.durationS - (elapsed - stepStart))
+        ),
         choices: waiting ? activeStep.waitForInput!.options.map((value) => ({ value, label: value.replace(/_/g, ' ').toUpperCase() })) : [],
         progress: complete ? 100 : waiting ? null : stepProgress,
         allowed_controls: complete ? ['reset'] : ['pause', 'abort']

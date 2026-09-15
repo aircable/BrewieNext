@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import threading
@@ -588,6 +589,35 @@ class ProcedureExecution:
         self.enter()
         return True
 
+    def next_state_target(self):
+        """Return the sole normal forward target, if it is unambiguous."""
+        targets = []
+        transitions = self.state.get("transition", self.state.get("transitions", []))
+        for item in transitions if isinstance(transitions, list) else []:
+            _, target, _ = self._parse_transition(item)
+            if target in {None, "loops", "error_handler"}:
+                continue
+            if isinstance(target, str) and target.startswith("error-"):
+                continue
+            if target not in targets:
+                targets.append(target)
+        return targets[0] if len(targets) == 1 else None
+
+    def advance_state(self):
+        """Operator-directed state advance using the normal exit/entry path."""
+        if self.status != "running":
+            raise RuntimeEngineError("Only a running procedure can advance state")
+        self.enter()
+        target = self.next_state_target()
+        if target is None:
+            raise RuntimeEngineError(
+                f"State '{self.current_state}' has no single safe next state"
+            )
+        previous = self.current_state
+        if not self._transition(target):
+            raise RuntimeEngineError(f"Cannot advance state '{previous}'")
+        self.log.append(f"Operator advanced {previous} to {target}")
+
     def tick(self, delta_s, parallel_primary_complete=False):
         if self.status != "running":
             return
@@ -690,8 +720,7 @@ class ProcedureExecution:
             "progress": self.progress(),
         }
 
-    def progress(self):
-        timeout = parse_duration(self.state.get("timeout_s"))
+    def state_duration_s(self):
         for item in self.state.get("transition", []):
             condition, _, _ = self._parse_transition(item)
             if not isinstance(condition, str):
@@ -705,8 +734,13 @@ class ProcedureExecution:
                     {**self.globals, **self.variables},
                     {"capture": lambda value: holder.update(value=float(value)) or True},
                 )
-                timeout = holder["value"]
-                break
+                return holder["value"]
+        return None
+
+    def progress(self):
+        timeout = self.state_duration_s()
+        if timeout is None:
+            timeout = parse_duration(self.state.get("timeout_s"))
         if not timeout:
             return None
         return max(0.0, min(100.0, self.state_elapsed_s / timeout * 100))
@@ -961,6 +995,12 @@ class WorkflowSession:
 
     def navigate(self, direction):
         with self._lock:
+            if direction == "next_state":
+                if self.status in self.TERMINAL or not self.active:
+                    raise RuntimeEngineError("No active state can be advanced")
+                self.active[0]["execution"].advance_state()
+                self.tick(0)
+                return
             target = self.step_index + (1 if direction == "next" else -1)
             if not 0 <= target < len(self.steps):
                 raise RuntimeEngineError(f"Cannot navigate {direction} from this procedure")
@@ -995,8 +1035,19 @@ class WorkflowSession:
         for definition in definitions if isinstance(definitions, list) else []:
             if not isinstance(definition, dict):
                 continue
-            raw = sensors.get(definition.get("sensor")) if definition.get("sensor") else self.globals.get(definition.get("global"))
-            value = "—" if raw is None else f"{raw:.1f}" if isinstance(raw, float) else str(raw)
+            if definition.get("remaining_state_time"):
+                duration = execution.state_duration_s()
+                remaining = None if duration is None else max(0, duration - execution.state_elapsed_s)
+                if remaining is None:
+                    value = "—"
+                else:
+                    total_seconds = int(math.ceil(remaining))
+                    hours, remainder = divmod(total_seconds, 3600)
+                    minutes, seconds = divmod(remainder, 60)
+                    value = f"{hours}:{minutes:02d}:{seconds:02d}" if hours else f"{minutes}:{seconds:02d}"
+            else:
+                raw = sensors.get(definition.get("sensor")) if definition.get("sensor") else self.globals.get(definition.get("global"))
+                value = "—" if raw is None else f"{raw:.1f}" if isinstance(raw, float) else str(raw)
             result.append({
                 "label": definition.get("label", "Value"),
                 "value": value,
@@ -1015,6 +1066,11 @@ class WorkflowSession:
                     0,
                 )
             primary = procedures[display_index] if procedures else None
+            can_advance_state = bool(
+                primary
+                and self.status not in self.TERMINAL
+                and self.active[display_index]["execution"].next_state_target()
+            )
             screen = primary["screen"] if primary else {
                 "title": "Brew complete", "message": "Brewing workflow completed.",
                 "footer_message": "", "readout_definitions": [], "choices": [], "progress": 100,
@@ -1067,7 +1123,8 @@ class WorkflowSession:
                     "allowed_controls": (
                         ["retry", "skip", "abort"] if self.status == "error" and self.recoverable
                         else ["abort"] if self.status == "error"
-                        else ["pause", "abort"] if self.status not in self.TERMINAL
+                        else (["next_state", "pause", "abort"] if can_advance_state else ["pause", "abort"])
+                        if self.status not in self.TERMINAL
                         else ["reset"]
                     ),
                 },
