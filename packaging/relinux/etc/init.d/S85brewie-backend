@@ -4,6 +4,7 @@ NAME=brewie-backend
 PIDFILE=/var/run/$NAME.pid
 ROOT=${BREWIE_RELEASE_ROOT:-/usr/share/brewie}/current
 PROGRAM_ROOT=${BREWIE_PROGRAM_ROOT:-/var/lib/brewie/programs}
+PROGRAM_SOURCE=${BREWIE_PROGRAM_SOURCE:-$PROGRAM_ROOT/source}
 PYTHON=${BREWIE_PYTHON:-/usr/bin/python3}
 BACKEND="$ROOT/backend/editor_backend.py"
 
@@ -15,8 +16,14 @@ case "$1" in
     export EDITOR_HOST="${EDITOR_HOST:-0.0.0.0}"
     export EDITOR_PORT="${EDITOR_PORT:-8081}"
     export EDITOR_DEBUG=0
-    if [ -f "$PROGRAM_ROOT/current/programs/beer_brewing.yml" ]; then
+    if [ -f "$PROGRAM_SOURCE/workflows/beer_brewing.yml" ]; then
+      export PROCEDURES_DIR="$PROGRAM_SOURCE"
+      export PROCEDURES_CREATE_DIR="$PROGRAM_SOURCE/procedures/brewing"
+      export SCHEMA_PATH="$PROGRAM_SOURCE/schemas/procedure.schema.json"
+      export GRAPH_SCHEMA_PATH="$PROGRAM_SOURCE/schemas/workflow.schema.json"
+    elif [ -f "$PROGRAM_ROOT/current/programs/beer_brewing.yml" ]; then
       export PROCEDURES_DIR="$PROGRAM_ROOT/current/programs"
+      export PROCEDURES_CREATE_DIR="$PROGRAM_ROOT/current/programs"
       export SCHEMA_PATH="$PROGRAM_ROOT/current/schemas/procedure.schema.json"
       export GRAPH_SCHEMA_PATH="$PROGRAM_ROOT/current/schemas/workflow.schema.json"
     else
@@ -34,6 +41,8 @@ case "$1" in
     export BREWIE_RUNTIME_STATE_FILE="${BREWIE_RUNTIME_STATE_FILE:-/var/lib/brewie/runtime-session.json}"
     export BREWIE_AVR_SAFE_START="${BREWIE_AVR_SAFE_START:-1}"
     export BREWIE_AVR_CALIBRATION_FILE="${BREWIE_AVR_CALIBRATION_FILE:-/etc/brewie/machine.json}"
+    export BREWIE_GITHUB_CONFIG="${BREWIE_GITHUB_CONFIG:-/etc/brewie/github.json}"
+    export BREWIE_PROGRAM_SOURCE="$PROGRAM_SOURCE"
     mkdir -p "$RECIPES_DIR"
     start-stop-daemon -S -q -b -m -p "$PIDFILE" -- "$PYTHON" "$BACKEND"
     ;;

@@ -29,6 +29,7 @@ from urllib.parse import urlparse
 from flask import Flask, request, jsonify, send_from_directory, Response
 from flask_cors import CORS
 from jsonschema import Draft7Validator
+from jsonschema.exceptions import SchemaError
 
 # ─── Shared Validation Module ─────────────────────────────────────────
 # Import all validation logic from the single shared module to prevent
@@ -50,6 +51,7 @@ from brewie_procedure_validation import (
 )
 from avr_serial import AvrSerialBridge, AvrSerialError, load_calibration
 from runtime_engine import RuntimeEngineError, RuntimeManager, WorkflowSession
+from program_sync import ProgramSync, ProgramSyncError
 
 # ─── Configuration ─────────────────────────────────────────────────────────
 # Resolve the monorepo root while retaining compatibility with a packaged backend.
@@ -98,6 +100,13 @@ AVR_BRIDGE = AvrSerialBridge(
     calibration=AVR_CALIBRATION,
 )
 RUNTIME_MANAGER = RuntimeManager(AVR_BRIDGE, RUNTIME_STATE_FILE)
+PROGRAM_SYNC = ProgramSync(
+    os.environ.get("BREWIE_GITHUB_CONFIG", "/etc/brewie/github.json"),
+    os.environ.get("BREWIE_PROGRAM_SOURCE", "/var/lib/brewie/programs/source"),
+)
+# Loading changes the documents used by future sessions. Starting a session and
+# activating a fetched checkout must therefore be mutually exclusive.
+PROGRAM_SOURCE_LOCK = threading.RLock()
 
 
 @app.after_request
@@ -122,6 +131,60 @@ try:
     RECIPE_SCHEMA = load_json_schema(RECIPE_SCHEMA_PATH)
 except (FileNotFoundError, json.JSONDecodeError):
     RECIPE_SCHEMA = None
+
+
+def validate_program_source(root):
+    """Validate an authoring checkout without executing any repository code."""
+    root = Path(root)
+    required = (
+        root / "catalog/programs.yml",
+        root / "schemas/procedure.schema.json",
+        root / "schemas/workflow.schema.json",
+        root / "workflows/beer_brewing.yml",
+    )
+    missing = [str(path.relative_to(root)) for path in required if not path.is_file()]
+    if missing:
+        raise ProgramSyncError("Repository is missing: " + ", ".join(missing))
+    try:
+        procedure_schema = load_json_schema(root / "schemas/procedure.schema.json")
+        workflow_schema = load_json_schema(root / "schemas/workflow.schema.json")
+        Draft7Validator.check_schema(procedure_schema)
+        Draft7Validator.check_schema(workflow_schema)
+        catalog = load_yaml_file(root / "catalog/programs.yml")
+        if not isinstance(catalog, dict) or not isinstance(catalog.get("programs"), list):
+            raise ValueError("catalog/programs.yml has no programs list")
+        documents = [
+            *sorted((root / "workflows").glob("*.yml")),
+            *sorted((root / "workflows").glob("*.yaml")),
+            *sorted((root / "procedures").rglob("*.yml")),
+            *sorted((root / "procedures").rglob("*.yaml")),
+        ]
+        if not documents:
+            raise ValueError("repository contains no procedure documents")
+        for path in documents:
+            document = load_yaml_file(path)
+            fmt = classify_procedure(document)
+            result = validate_procedure(
+                document, procedure_schema, fmt, graph_schema=workflow_schema
+            )
+            if not result.get("valid"):
+                detail = "; ".join(result.get("errors", []))
+                raise ValueError(f"{path.relative_to(root)}: {detail}")
+    except (OSError, ValueError, TypeError, yaml.YAMLError, json.JSONDecodeError, SchemaError) as error:
+        raise ProgramSyncError(f"Procedure repository validation failed: {error}") from None
+
+
+def activate_program_source(root):
+    """Use a validated source checkout for subsequent editor/runtime requests."""
+    global PROCEDURES_DIR, PROCEDURES_CREATE_DIR, SCHEMA_PATH, GRAPH_SCHEMA_PATH
+    global SCHEMA, GRAPH_SCHEMA
+    root = Path(root)
+    PROCEDURES_DIR = str(root)
+    PROCEDURES_CREATE_DIR = str(root / "procedures/brewing")
+    SCHEMA_PATH = str(root / "schemas/procedure.schema.json")
+    GRAPH_SCHEMA_PATH = str(root / "schemas/workflow.schema.json")
+    SCHEMA = load_json_schema(SCHEMA_PATH)
+    GRAPH_SCHEMA = load_json_schema(GRAPH_SCHEMA_PATH)
 
 # ─── Execution Simulation ──────────────────────────────────────────────────
 
@@ -2052,6 +2115,62 @@ def _require_local_runtime_command():
     return None
 
 
+def _program_sync_status():
+    status = PROGRAM_SYNC.status()
+    session = RUNTIME_MANAGER.session
+    active = bool(
+        RUNTIME_MANAGER.interrupted
+        or (session and session.status not in WorkflowSession.TERMINAL)
+    )
+    return {**status, "load_allowed": not active, "runtime_active": active}
+
+
+@app.route("/api/program-sync", methods=["GET"])
+def api_program_sync_status():
+    return jsonify({"data": _program_sync_status()})
+
+
+@app.route("/api/program-sync/load", methods=["POST"])
+def api_program_sync_load():
+    denied = _require_local_runtime_command()
+    if denied:
+        return denied
+    try:
+        with PROGRAM_SOURCE_LOCK:
+            session = RUNTIME_MANAGER.session
+            if RUNTIME_MANAGER.interrupted or (
+                session and session.status not in WorkflowSession.TERMINAL
+            ):
+                raise ProgramSyncError("Load is unavailable while a brew session is active")
+            result = PROGRAM_SYNC.load(validate_program_source)
+            activate_program_source(PROGRAM_SYNC.worktree)
+        return jsonify({"data": {**result, "load_allowed": True, "runtime_active": False}})
+    except ProgramSyncError as error:
+        return jsonify({"error": str(error), "data": _program_sync_status()}), 409
+
+
+@app.route("/api/program-sync/save", methods=["POST"])
+def api_program_sync_save():
+    denied = _require_local_runtime_command()
+    if denied:
+        return denied
+    try:
+        result = PROGRAM_SYNC.save(validate_program_source)
+        return jsonify({"data": {
+            **result,
+            "load_allowed": not bool(RUNTIME_MANAGER.interrupted or (
+                RUNTIME_MANAGER.session
+                and RUNTIME_MANAGER.session.status not in WorkflowSession.TERMINAL
+            )),
+            "runtime_active": bool(RUNTIME_MANAGER.interrupted or (
+                RUNTIME_MANAGER.session
+                and RUNTIME_MANAGER.session.status not in WorkflowSession.TERMINAL
+            )),
+        }})
+    except ProgramSyncError as error:
+        return jsonify({"error": str(error), "data": _program_sync_status()}), 409
+
+
 def _runtime_client(body=None):
     body = body or {}
     client_id = body.get("client_id") or request.args.get("client_id") or request.headers.get("X-Brewie-Client", "")
@@ -2095,17 +2214,18 @@ def api_start_runtime_session():
     if mode == "hardware" and body.get("confirm_hardware") is not True:
         return jsonify({"error": "Hardware mode requires confirm_hardware=true"}), 400
     try:
-        workflow, procedures, globals_snapshot = _runtime_bundle(
-            workflow_name, body.get("recipe_id")
-        )
-        snapshot = _runtime_command(
-            body,
-            lambda: RUNTIME_MANAGER.start(
-                workflow, procedures, globals_snapshot,
-                mode=mode, speed=body.get("speed", 60),
-            ),
-            force_authorization=mode == "hardware",
-        )
+        with PROGRAM_SOURCE_LOCK:
+            workflow, procedures, globals_snapshot = _runtime_bundle(
+                workflow_name, body.get("recipe_id")
+            )
+            snapshot = _runtime_command(
+                body,
+                lambda: RUNTIME_MANAGER.start(
+                    workflow, procedures, globals_snapshot,
+                    mode=mode, speed=body.get("speed", 60),
+                ),
+                force_authorization=mode == "hardware",
+            )
         return jsonify({"data": snapshot}), 201
     except RuntimeEngineError as error:
         status = 409 if "already active" in str(error) else 503 if "not connected" in str(error) else 400

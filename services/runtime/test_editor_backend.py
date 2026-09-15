@@ -16,6 +16,7 @@ from editor_backend import (
     _update_workflow_step,
     app,
     recipe_global_values,
+    validate_program_source,
 )
 
 import editor_backend
@@ -76,6 +77,9 @@ class ProcedureRunnerExitTests(unittest.TestCase):
 class RecipeGlobalFillTests(unittest.TestCase):
     editor_root = Path(os.environ["PROCEDURES_DIR"])
     recipe_root = Path(os.environ["BUNDLED_RECIPES_DIR"])
+
+    def test_authoring_repository_is_safe_to_activate(self):
+        validate_program_source(self.editor_root)
 
     def test_program_catalog_is_found_from_release_schema_root(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -34,6 +34,7 @@ cp "$RUNTIME_ROOT/editor_backend.py" \
   "$RUNTIME_ROOT/avr_serial.py" \
   "$RUNTIME_ROOT/hardware_registry.py" \
   "$RUNTIME_ROOT/runtime_engine.py" \
+  "$RUNTIME_ROOT/program_sync.py" \
   "$RUNTIME_ROOT/recipe.schema.json" \
   "$RUNTIME_ROOT/hardware-device-registry.yml" \
   "$RUNTIME_ROOT/hardware-device-registry.schema.json" \

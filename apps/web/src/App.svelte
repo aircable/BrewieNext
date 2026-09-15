@@ -9,7 +9,7 @@
   import ProgramScreen from './components/ProgramScreen.svelte';
   import ConfirmDialog from './components/ConfirmDialog.svelte';
   import BusyOverlay from './components/BusyOverlay.svelte';
-  import { addWorkflowStep, controlRuntime, createProcedure, loadGraph, loadMachineStatus, loadProcedure, loadPrograms, loadRecipe, loadRecipes, loadRuntimeStatus, navigateRuntime, permitRuntimeControl, provideRuntimeInput, recoverRuntime, removeWorkflowStep, requestRuntimeControl, resolveGraph, saveProcedure, saveRecipe, sendMachineCommand, startRuntime, updateWorkflowStep, validateDraft, validateRecipe, type RuntimeStatus } from './lib/api';
+  import { addWorkflowStep, controlRuntime, createProcedure, loadGraph, loadMachineStatus, loadProcedure, loadPrograms, loadProgramsFromGitHub, loadProgramSyncStatus, loadRecipe, loadRecipes, loadRuntimeStatus, navigateRuntime, permitRuntimeControl, provideRuntimeInput, recoverRuntime, removeWorkflowStep, requestRuntimeControl, resolveGraph, saveProcedure, saveProgramsToGitHub, saveRecipe, sendMachineCommand, startRuntime, updateWorkflowStep, validateDraft, validateRecipe, type ProgramSyncStatus, type RuntimeStatus } from './lib/api';
   import { graph, session, selectedNode, selectedProcedure, editorMode, notice } from './lib/store';
   import { buildSimulationPlan, createIdleMachineStatus, type SimulationPlan } from './lib/simulation';
   import type { GraphNode, ProcedureDocument, ProgramSummary, Recipe, RecipeSummary } from './lib/model';
@@ -42,6 +42,8 @@
   let selectedProgramId = '';
   let dismissedTerminalSessionId: string | null = null;
   let busyMessage = '';
+  let programSync: ProgramSyncStatus | null = null;
+  let programSyncBusy = false;
   let dialog: { title: string; message: string; confirmLabel: string; danger: boolean; resolve: (value: boolean) => void } | null = null;
   const kioskMode = typeof window !== 'undefined' && window.location.search.indexOf('kiosk=1') !== -1;
   const requestedRuntimeView = typeof window !== 'undefined' && window.location.search.indexOf('view=runtime') !== -1;
@@ -113,6 +115,9 @@
     loadPrograms()
       .then((value) => (programs = value))
       .catch((error) => debug(`PROGRAM ERROR: ${error instanceof Error ? error.message : String(error)}`));
+    loadProgramSyncStatus()
+      .then((value) => (programSync = value))
+      .catch(() => { /* older backends do not expose repository synchronization */ });
     const refreshProgramCatalog = async () => {
       try {
         programs = await loadPrograms(false);
@@ -149,6 +154,77 @@
     const active = dialog;
     dialog = null;
     active?.resolve(result);
+  }
+
+  function programSyncLabel() {
+    if (!programSync?.configured) return 'GITHUB NOT CONFIGURED';
+    if (!programSync.initialized) return `${programSync.branch || 'main'} · NOT LOADED`;
+    if (programSync.dirty || programSync.ahead) return `${programSync.branch || 'main'} · LOCAL CHANGES`;
+    if (programSync.behind) return `${programSync.branch || 'main'} · UPDATE AVAILABLE`;
+    return `${programSync.branch || 'main'} · SAVED`;
+  }
+
+  async function refreshProgramSync() {
+    try { programSync = await loadProgramSyncStatus(); } catch { /* keep prior status */ }
+  }
+
+  async function loadFromGitHub() {
+    if (!programSync?.configured || programSyncBusy) return;
+    if (procedureDirty || nodeDirty) {
+      message = 'Save the open procedure or workflow changes before loading from GitHub.';
+      return;
+    }
+    if (!programSync.load_allowed) {
+      message = 'GitHub Load is locked while a brew session is active.';
+      return;
+    }
+    const confirmed = await ask(
+      'Load procedures from GitHub?',
+      `Load the latest ${programSync.branch || 'main'} workflow set? Unsaved files in the repository will be protected.`,
+      'LOAD'
+    );
+    if (!confirmed) return;
+    programSyncBusy = true;
+    message = 'Loading and validating procedures from GitHub…';
+    try {
+      programSync = await loadProgramsFromGitHub();
+      programs = await loadPrograms(false);
+      const loadedGraph = await loadGraph(currentGraph.name);
+      graph.set(loadedGraph);
+      const activeNode = loadedGraph.nodes.find((node) => node.id === currentNode.id) || loadedGraph.nodes[0];
+      if (activeNode) {
+        selectedNode.set(activeNode);
+        selectedProcedure.set(await loadProcedure(activeNode.procedure));
+      }
+      selectedState = '';
+      message = `Loaded and validated ${programSync.branch || 'main'} at ${programSync.head || 'latest commit'}.`;
+    } catch (error) {
+      message = `GitHub Load failed: ${error instanceof Error ? error.message : 'unknown error'}`;
+      await refreshProgramSync();
+    } finally {
+      programSyncBusy = false;
+    }
+  }
+
+  async function saveToGitHub() {
+    if (!programSync?.configured || programSyncBusy) return;
+    if (procedureDirty || nodeDirty) {
+      message = 'Save the open procedure or workflow changes before saving to GitHub.';
+      return;
+    }
+    programSyncBusy = true;
+    message = 'Validating and saving procedures to GitHub…';
+    try {
+      programSync = await saveProgramsToGitHub();
+      message = programSync.changed
+        ? `Saved procedures to ${programSync.branch || 'main'} at ${programSync.head}.`
+        : 'GitHub is already up to date.';
+    } catch (error) {
+      message = `GitHub Save failed: ${error instanceof Error ? error.message : 'unknown error'}`;
+      await refreshProgramSync();
+    } finally {
+      programSyncBusy = false;
+    }
   }
 
   function allowNavigation() {
@@ -616,6 +692,7 @@
       selectedNode.set(updated.nodes.find((node) => node.id === currentNode.id) || currentNode);
       nodeDirty = false;
       message = `Saved workflow node ${currentNode.label}.`;
+      await refreshProgramSync();
     } catch (error) {
       message = `Save node failed: ${error instanceof Error ? error.message : 'unknown error'}`;
     }
@@ -857,6 +934,7 @@
       selectedProcedure.set(savedProcedure);
       procedureDirty = false;
       message = `Saved ${resourceName}.`;
+      await refreshProgramSync();
     } catch (error) {
       message = `Save failed: ${error instanceof Error ? error.message : 'unknown error'}`;
     }
@@ -887,6 +965,11 @@
       <button class:active={mode === 'programs'} on:click={showPrograms}>Programs</button>
       <button class:active={mode === 'recipes'} on:click={showRecipes}>Recipes</button>
       <button class:active={mode === 'runtime'} on:click={showRuntime} disabled={programs.find((program) => program.workflow === currentGraph.name)?.status === 'design'}>Live brew</button>
+      {#if programSync}
+        <span class="sync-status">{programSyncLabel()}</span>
+        <button on:click={loadFromGitHub} disabled={!programSync.configured || !programSync.load_allowed || programSyncBusy}>Load</button>
+        <button class="primary" on:click={saveToGitHub} disabled={!programSync.configured || !programSync.initialized || programSyncBusy}>Save GitHub</button>
+      {/if}
       <span class="connection">● LOCAL</span>
     </nav>
   </header>

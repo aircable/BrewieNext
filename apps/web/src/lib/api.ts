@@ -40,6 +40,21 @@ export type RuntimeStatus = {
   };
 };
 
+export type ProgramSyncStatus = {
+  configured: boolean;
+  initialized: boolean;
+  dirty: boolean;
+  repository: string | null;
+  branch: string | null;
+  head: string | null;
+  ahead: number;
+  behind: number;
+  error: string | null;
+  load_allowed: boolean;
+  runtime_active: boolean;
+  changed?: boolean;
+};
+
 // Static assets are served on 8080. The optional Flask editor API uses 8081
 // so the two services can run independently on the embedded image.
 const API_BASE = import.meta.env.VITE_API_BASE_URL ||
@@ -111,6 +126,25 @@ export async function loadPrograms(useFallback = true): Promise<ProgramSummary[]
       workflow: 'beer_brewing'
     }];
   }
+}
+
+export async function loadProgramSyncStatus(): Promise<ProgramSyncStatus> {
+  const result = await request<{ data: ProgramSyncStatus }>('/api/program-sync');
+  return result.data;
+}
+
+export async function loadProgramsFromGitHub(): Promise<ProgramSyncStatus> {
+  const result = await request<{ data: ProgramSyncStatus }>('/api/program-sync/load', {
+    method: 'POST', body: '{}'
+  });
+  return result.data;
+}
+
+export async function saveProgramsToGitHub(): Promise<ProgramSyncStatus> {
+  const result = await request<{ data: ProgramSyncStatus }>('/api/program-sync/save', {
+    method: 'POST', body: '{}'
+  });
+  return result.data;
 }
 
 export async function loadGraph(name = 'beer_brewing'): Promise<BrewGraph> {
