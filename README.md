@@ -25,6 +25,14 @@ Keep the two repositories beside each other as shown. Procedure-editor saves
 then belong to the `BrewieNextProcedures` Git checkout, where they can be
 validated, reviewed, committed, and released independently.
 
+Clone `BrewieNextProcedures` before starting local development if procedure
+changes must be publishable. Without the sibling checkout, bootstrap intentionally
+uses the disposable `.dev/programs/workspace`; it has no Git remote and Studio's
+GitHub Save cannot publish those edits. On the Brewie appliance, the equivalent
+first step is Studio's **Load** action, which creates the persistent checkout.
+See [Saving procedures to GitHub](docs/brewie-web-installation.md#saving-procedures-to-github)
+for token configuration and the machine workflow.
+
 Open <http://127.0.0.1:5173>. The command creates `.dev/`, downloads and
 verifies the pinned procedure release, starts the real Python runner with AVR
 access disabled, and starts the web UI. When a sibling `BrewieNextProcedures`
