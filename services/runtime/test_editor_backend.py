@@ -80,16 +80,46 @@ class RecipeGlobalFillTests(unittest.TestCase):
     editor_root = Path(os.environ["PROCEDURES_DIR"])
     recipe_root = Path(os.environ["BUNDLED_RECIPES_DIR"])
 
-    def test_authoring_repository_is_safe_to_activate(self):
-        validate_program_source(self.editor_root)
-
-    def test_authoring_repository_enforces_machine_sensor_contract(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            checkout = Path(temporary) / "procedures"
+    def make_authoring_checkout(self, temporary):
+        """Exercise Git validation with either local source or the CI release bundle."""
+        checkout = Path(temporary) / "checkout"
+        if (self.editor_root / "workflows").is_dir():
             shutil.copytree(
                 self.editor_root, checkout,
                 ignore=shutil.ignore_patterns(".git", "dist", ".backups", "__pycache__"),
             )
+            return checkout
+
+        bundle_root = Path(os.environ["SCHEMA_PATH"]).parent.parent
+        for section in ("schemas", "contracts", "catalog"):
+            shutil.copytree(bundle_root / section, checkout / section)
+        (checkout / "workflows").mkdir()
+        shutil.copy2(
+            self.editor_root / "beer_brewing.yml",
+            checkout / "workflows/beer_brewing.yml",
+        )
+        procedure_dir = checkout / "procedures/brewing"
+        procedure_dir.mkdir(parents=True)
+        (procedure_dir / "pump_probe.yml").write_text(yaml.safe_dump({
+            "name": "pump_probe",
+            "description": "Check B20 pump-current contract",
+            "start_state": "check",
+            "states": {"check": {
+                "description": "Read mash pump current",
+                "action": [{"read_sensor": "mash_pump_current"}],
+                "transition": [{"default": "next_phase"}],
+            }},
+            "error_handler": "pump-probe-error",
+        }, sort_keys=False))
+        return checkout
+
+    def test_authoring_repository_is_safe_to_activate(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            validate_program_source(self.make_authoring_checkout(temporary))
+
+    def test_authoring_repository_enforces_machine_sensor_contract(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            checkout = self.make_authoring_checkout(temporary)
             contract_path = checkout / "contracts/brewie-b20.yml"
             contract = yaml.safe_load(contract_path.read_text())
             contract["sensors"].remove("mash_pump_current")
