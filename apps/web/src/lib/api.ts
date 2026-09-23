@@ -371,11 +371,14 @@ function toWireProcedure(data: ProcedureDocument): Record<string, unknown> {
   // Procedure cleanup is state-scoped. Never preserve obsolete hidden
   // procedure-level finalize blocks from documents loaded before migration.
   delete raw.finalize;
+  // Write one canonical dialect. Older bundles may also carry the legacy
+  // phase/error aliases; retaining them creates unrelated Git changes and can
+  // leave conflicting identities beside name/error_handler.
+  delete raw.phase;
+  delete raw.error;
   const recipeGlobalProcedure = ['fill_mash_water', 'fill_sparge_water', 'heat_mash_water'].includes(data.name);
   if (recipeGlobalProcedure) {
     delete raw.parameters;
-    delete raw.phase;
-    delete raw.error;
   }
   const states: Record<string, unknown> = {};
   for (const state of data.states) {

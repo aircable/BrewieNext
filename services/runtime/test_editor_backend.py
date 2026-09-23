@@ -1,4 +1,5 @@
 import os
+import shutil
 import tempfile
 import time
 import unittest
@@ -20,6 +21,7 @@ from editor_backend import (
 )
 
 import editor_backend
+from program_sync import ProgramSyncError
 
 
 def load_procedure(filename):
@@ -80,6 +82,20 @@ class RecipeGlobalFillTests(unittest.TestCase):
 
     def test_authoring_repository_is_safe_to_activate(self):
         validate_program_source(self.editor_root)
+
+    def test_authoring_repository_enforces_machine_sensor_contract(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            checkout = Path(temporary) / "procedures"
+            shutil.copytree(
+                self.editor_root, checkout,
+                ignore=shutil.ignore_patterns(".git", "dist", ".backups", "__pycache__"),
+            )
+            contract_path = checkout / "contracts/brewie-b20.yml"
+            contract = yaml.safe_load(contract_path.read_text())
+            contract["sensors"].remove("mash_pump_current")
+            contract_path.write_text(yaml.safe_dump(contract, sort_keys=False))
+            with self.assertRaisesRegex(ProgramSyncError, "unknown sensor 'mash_pump_current'"):
+                validate_program_source(checkout)
 
     def test_program_catalog_is_found_from_release_schema_root(self):
         with tempfile.TemporaryDirectory() as temporary:

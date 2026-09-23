@@ -150,6 +150,7 @@ def validate_program_source(root):
     root = Path(root)
     required = (
         root / "catalog/programs.yml",
+        root / "contracts/brewie-b20.yml",
         root / "schemas/procedure.schema.json",
         root / "schemas/workflow.schema.json",
         root / "workflows/beer_brewing.yml",
@@ -165,6 +166,10 @@ def validate_program_source(root):
         catalog = load_yaml_file(root / "catalog/programs.yml")
         if not isinstance(catalog, dict) or not isinstance(catalog.get("programs"), list):
             raise ValueError("catalog/programs.yml has no programs list")
+        machine_contract = load_yaml_file(root / "contracts/brewie-b20.yml")
+        contract_sensors = set(machine_contract.get("sensors", []))
+        if not contract_sensors:
+            raise ValueError("contracts/brewie-b20.yml has no sensors list")
         documents = [
             *sorted((root / "workflows").glob("*.yml")),
             *sorted((root / "workflows").glob("*.yaml")),
@@ -182,6 +187,23 @@ def validate_program_source(root):
             if not result.get("valid"):
                 detail = "; ".join(result.get("errors", []))
                 raise ValueError(f"{path.relative_to(root)}: {detail}")
+            if fmt != "graph":
+                for state_name, state in document.get("states", {}).items():
+                    for section in ("action", "on_exit"):
+                        for index, action in enumerate(state.get(section, [])):
+                            if not isinstance(action, dict):
+                                continue
+                            kind = next(iter(action), None)
+                            if kind not in {"read", "read_sensor"}:
+                                continue
+                            value = action[kind]
+                            sensor = value if isinstance(value, str) else value.get("sensor")
+                            if sensor not in contract_sensors:
+                                relative = path.relative_to(root)
+                                raise ValueError(
+                                    f"{relative}: {state_name}.{section}[{index}]: "
+                                    f"unknown sensor {sensor!r} in machine contract"
+                                )
     except (OSError, ValueError, TypeError, yaml.YAMLError, json.JSONDecodeError, SchemaError) as error:
         raise ProgramSyncError(f"Procedure repository validation failed: {error}") from None
 

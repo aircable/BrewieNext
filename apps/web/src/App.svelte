@@ -217,8 +217,8 @@
     try {
       programSync = await saveProgramsToGitHub();
       message = programSync.changed
-        ? `Saved procedures to ${programSync.branch || 'main'} at ${programSync.head}.`
-        : 'GitHub is already up to date.';
+        ? `Committed and pushed procedures to GitHub ${programSync.branch || 'main'} at ${programSync.head}. GitHub validation runs afterward.`
+        : 'No new procedure changes; GitHub is already up to date.';
     } catch (error) {
       message = `GitHub Save failed: ${error instanceof Error ? error.message : 'unknown error'}`;
       await refreshProgramSync();
